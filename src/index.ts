@@ -252,7 +252,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'commit_notes',
+    name: 'git_commit_notes',
     description: 'Commit all uncommitted changes to git with an auto-generated or custom message.',
     inputSchema: {
       type: 'object',
@@ -273,7 +273,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'commit_notes_specific',
+    name: 'git_commit_notes_specific',
     description: 'Commit specific note files to git.',
     inputSchema: {
       type: 'object',
@@ -300,7 +300,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'sync_notes',
+    name: 'git_sync_notes',
     description: 'Sync notes by fetching from remote and pulling changes. Detects and reports merge conflicts.',
     inputSchema: {
       type: 'object',
@@ -387,7 +387,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'commit_notes': {
+      case 'git_commit_notes': {
         const { message, author_name, author_email } = CommitNotesSchema.parse(args);
 
         let commitMessage = message;
@@ -421,7 +421,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'commit_notes_specific': {
+      case 'git_commit_notes_specific': {
         const { note_paths, message, author_name, author_email } = CommitNotesSpecificSchema.parse(args);
 
         let commitMessage = message;
@@ -445,7 +445,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'sync_notes': {
+      case 'git_sync_notes': {
         SyncNotesSchema.parse(args);
         const result: GitSyncResult = gitManager.syncNotes();
         return {
