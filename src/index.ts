@@ -14,6 +14,8 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+import { execFileSync } from 'child_process';
+import * as path from 'path';
 import { z } from 'zod';
 import { SmartConnectionsLoader } from './smart-connections-loader.js';
 import { SearchEngine } from './search-engine.js';
@@ -36,6 +38,9 @@ await loader.initialize();
 
 // Create search engine after loader is initialized
 const searchEngine = new SearchEngine(loader);
+
+// Initialize git manager for the vault
+const gitManager = new GitManager(VAULT_PATH);
 
 console.error('Smart Connections MCP Server initialized successfully');
 console.error(`Vault: ${VAULT_PATH}`);
@@ -377,6 +382,78 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify(result, null, 2),
             },
           ],
+        };
+      }
+
+      case 'commit_notes': {
+        const { message, author_name, author_email } = CommitNotesSchema.parse(args);
+
+        let commitMessage = message;
+        if (!commitMessage) {
+          try {
+            const statusOutput = execFileSync('git', ['status', '--short'], {
+              cwd: VAULT_PATH,
+              stdio: 'pipe',
+              encoding: 'utf-8',
+            });
+            const files = statusOutput
+              .split('\n')
+              .filter((line) => line.length > 0)
+              .map((line) => line.substring(3));
+            const fileList = files.length > 5 ? [...files.slice(0, 4), '...'].join(', ') : files.join(', ');
+            commitMessage = `Updated: ${fileList || 'workspace'}`;
+          } catch {
+            commitMessage = 'Updated: workspace';
+          }
+        }
+
+        const result: GitCommitResult = gitManager.commitAll(commitMessage, author_name, author_email);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+          isError: !result.success,
+        };
+      }
+
+      case 'commit_notes_specific': {
+        const { note_paths, message, author_name, author_email } = CommitNotesSpecificSchema.parse(args);
+
+        let commitMessage = message;
+        if (!commitMessage) {
+          const noteList = note_paths.slice(0, 3).join(', ');
+          const suffix = note_paths.length > 3 ? ` (+${note_paths.length - 3} more)` : '';
+          commitMessage = `Updated: ${noteList}${suffix}`;
+        }
+
+        const absolutePaths = note_paths.map((notePath) => path.join(VAULT_PATH, notePath));
+        const result: GitCommitResult = gitManager.commitSpecific(absolutePaths, commitMessage, author_name, author_email);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+          isError: !result.success,
+        };
+      }
+
+      case 'sync_notes': {
+        SyncNotesSchema.parse(args);
+        const result: GitSyncResult = gitManager.syncNotes();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+          isError: !result.success,
         };
       }
 
