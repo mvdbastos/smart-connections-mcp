@@ -8,9 +8,12 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { execFileSync } from 'child_process';
+import * as path from 'path';
 import { z } from 'zod';
 import { SmartConnectionsLoader } from './smart-connections-loader.js';
 import { SearchEngine } from './search-engine.js';
+import { GitManager } from './git-manager.js';
 // Environment variable for vault path
 const VAULT_PATH = process.env.SMART_VAULT_PATH;
 if (!VAULT_PATH) {
@@ -24,6 +27,8 @@ const loader = new SmartConnectionsLoader(VAULT_PATH);
 await loader.initialize();
 // Create search engine after loader is initialized
 const searchEngine = new SearchEngine(loader);
+// Initialize git manager for the vault
+const gitManager = new GitManager(VAULT_PATH);
 console.error('Smart Connections MCP Server initialized successfully');
 console.error(`Vault: ${VAULT_PATH}`);
 console.error(`Loaded ${loader.getSources().size} notes`);
@@ -63,6 +68,18 @@ const GetNoteContentSchema = z.object({
     include_blocks: z.array(z.string()).optional().describe('Specific block headings to include'),
 });
 const GetStatsSchema = z.object({});
+const CommitNotesSchema = z.object({
+    message: z.string().optional().describe('Commit message; auto-generated if omitted'),
+    author_name: z.string().optional().describe('Git author name; uses config if omitted'),
+    author_email: z.string().optional().describe('Git author email; uses config if omitted'),
+});
+const CommitNotesSpecificSchema = z.object({
+    note_paths: z.array(z.string()).describe('Paths to notes to commit (relative to vault)'),
+    message: z.string().optional().describe('Commit message; auto-generated if omitted'),
+    author_name: z.string().optional().describe('Git author name; uses config if omitted'),
+    author_email: z.string().optional().describe('Git author email; uses config if omitted'),
+});
+const SyncNotesSchema = z.object({});
 // Define available tools
 const tools = [
     {
@@ -207,7 +224,64 @@ const tools = [
             properties: {},
         },
     },
+    {
+        name: 'commit_notes',
+        description: 'Commit all uncommitted changes to git with an auto-generated or custom message.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                message: {
+                    type: 'string',
+                    description: 'Commit message; auto-generated if omitted (e.g., "Updated: note1.md, note2.md")',
+                },
+                author_name: {
+                    type: 'string',
+                    description: 'Git author name; uses git config user.name if omitted',
+                },
+                author_email: {
+                    type: 'string',
+                    description: 'Git author email; uses git config user.email if omitted',
+                },
+            },
+        },
+    },
+    {
+        name: 'commit_notes_specific',
+        description: 'Commit specific note files to git.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                note_paths: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Paths to notes to commit (relative to vault root, e.g., ["Note.md", "Folder/Note.md"])',
+                },
+                message: {
+                    type: 'string',
+                    description: 'Commit message; auto-generated if omitted',
+                },
+                author_name: {
+                    type: 'string',
+                    description: 'Git author name; uses git config user.name if omitted',
+                },
+                author_email: {
+                    type: 'string',
+                    description: 'Git author email; uses git config user.email if omitted',
+                },
+            },
+            required: ['note_paths'],
+        },
+    },
+    {
+        name: 'sync_notes',
+        description: 'Sync notes by fetching from remote and pulling changes. Detects and reports merge conflicts.',
+        inputSchema: {
+            type: 'object',
+            properties: {},
+        },
+    },
 ];
+console.error(`Registered ${tools.length} tools: ${tools.map((tool) => tool.name).join(', ')}`);
 // Handle tool list requests
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools };
@@ -277,14 +351,87 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
-            case 'get_stats': {
-                GetStatsSchema.parse(args);
-                const stats = searchEngine.getStats();
+            case 'commit_notes': {
+                const { message, author_name, author_email } = CommitNotesSchema.parse(args);
+                let commitMessage = message;
+                if (!commitMessage) {
+                    try {
+                        const statusOutput = execFileSync('git', ['status', '--short'], {
+                            cwd: VAULT_PATH,
+                            stdio: 'pipe',
+                            encoding: 'utf-8',
+                        });
+                        const files = statusOutput
+                            .split('\n')
+                            .filter((line) => line.length > 0)
+                            .map((line) => line.substring(3));
+                        const fileList = files.length > 5 ? [...files.slice(0, 4), '...'].join(', ') : files.join(', ');
+                        commitMessage = `Updated: ${fileList || 'workspace'}`;
+                    }
+                    catch {
+                        commitMessage = 'Updated: workspace';
+                    }
+                }
+                const result = gitManager.commitAll(commitMessage, author_name, author_email);
                 return {
                     content: [
                         {
                             type: 'text',
-                            text: JSON.stringify(stats, null, 2),
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                    isError: !result.success,
+                };
+            }
+            case 'commit_notes_specific': {
+                const { note_paths, message, author_name, author_email } = CommitNotesSpecificSchema.parse(args);
+                let commitMessage = message;
+                if (!commitMessage) {
+                    const noteList = note_paths.slice(0, 3).join(', ');
+                    const suffix = note_paths.length > 3 ? ` (+${note_paths.length - 3} more)` : '';
+                    commitMessage = `Updated: ${noteList}${suffix}`;
+                }
+                const absolutePaths = note_paths.map((notePath) => path.join(VAULT_PATH, notePath));
+                const result = gitManager.commitSpecific(absolutePaths, commitMessage, author_name, author_email);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                    isError: !result.success,
+                };
+            }
+            case 'sync_notes': {
+                SyncNotesSchema.parse(args);
+                const result = gitManager.syncNotes();
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                    isError: !result.success,
+                };
+            }
+            case 'get_stats': {
+                GetStatsSchema.parse(args);
+                const stats = searchEngine.getStats();
+                let gitStatus = null;
+                if (gitManager.isGitAvailable()) {
+                    gitStatus = gitManager.getStatus();
+                }
+                const combinedStats = {
+                    ...stats,
+                    git: gitStatus,
+                };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(combinedStats, null, 2),
                         },
                     ],
                 };

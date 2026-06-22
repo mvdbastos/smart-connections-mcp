@@ -309,6 +309,8 @@ const tools: Tool[] = [
   },
 ];
 
+console.error(`Registered ${tools.length} tools: ${tools.map((tool) => tool.name).join(', ')}`);
+
 // Handle tool list requests
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
@@ -460,11 +462,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_stats': {
         GetStatsSchema.parse(args);
         const stats = searchEngine.getStats();
+        let gitStatus: GitStatus | null = null;
+
+        if (gitManager.isGitAvailable()) {
+          gitStatus = gitManager.getStatus();
+        }
+
+        const combinedStats = {
+          ...stats,
+          git: gitStatus,
+        };
+
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(stats, null, 2),
+              text: JSON.stringify(combinedStats, null, 2),
             },
           ],
         };
