@@ -8,11 +8,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
 
-export class GitManager {
-  private vaultPath: string;
+interface GitManagerOptions {
+  commandTimeoutMs?: number;
+  gitExecutable?: string;
+  gitArgsPrefix?: string[];
+}
 
-  constructor(vaultPath: string) {
+export class GitManager {
+  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 8_000;
+
+  private vaultPath: string;
+  private commandTimeoutMs: number;
+  private gitExecutable: string;
+  private gitArgsPrefix: string[];
+
+  constructor(vaultPath: string, options: GitManagerOptions = {}) {
     this.vaultPath = vaultPath;
+    this.commandTimeoutMs = options.commandTimeoutMs ?? GitManager.DEFAULT_COMMAND_TIMEOUT_MS;
+    this.gitExecutable = options.gitExecutable ?? 'git';
+    this.gitArgsPrefix = options.gitArgsPrefix ?? [];
   }
 
   /**
@@ -20,7 +34,11 @@ export class GitManager {
    */
   isGitAvailable(): boolean {
     try {
-      execFileSync('git', ['--version'], { stdio: 'pipe' });
+      execFileSync(this.gitExecutable, [...this.gitArgsPrefix, '--version'], {
+        stdio: 'pipe',
+        timeout: this.commandTimeoutMs,
+        env: this.getGitEnv(),
+      });
       return true;
     } catch {
       return false;
@@ -249,11 +267,20 @@ export class GitManager {
   }
 
   private git(args: string[]): string {
-    return execFileSync('git', args, {
+    return execFileSync(this.gitExecutable, [...this.gitArgsPrefix, ...args], {
       cwd: this.vaultPath,
       stdio: 'pipe',
       encoding: 'utf-8',
+      timeout: this.commandTimeoutMs,
+      env: this.getGitEnv(),
     });
+  }
+
+  private getGitEnv(): NodeJS.ProcessEnv {
+    return {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+    };
   }
 
   private getUnavailableResult(): GitCommitResult | null {
@@ -382,7 +409,11 @@ export class GitManager {
 
   private formatError(error: unknown): string {
     if (error instanceof Error) {
-      const maybeError = error as Error & { stderr?: Buffer | string };
+      const maybeError = error as Error & { code?: string; signal?: string; stderr?: Buffer | string };
+      if (maybeError.code === 'ETIMEDOUT' || maybeError.signal === 'SIGTERM') {
+        return `Git command timed out after ${this.commandTimeoutMs}ms`;
+      }
+
       const stderr = maybeError.stderr?.toString().trim();
       return stderr || error.message;
     }

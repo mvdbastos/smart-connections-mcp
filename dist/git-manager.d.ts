@@ -3,9 +3,18 @@
  * Handles all git operations (commit, fetch, pull, status)
  */
 import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
+interface GitManagerOptions {
+    commandTimeoutMs?: number;
+    gitExecutable?: string;
+    gitArgsPrefix?: string[];
+}
 export declare class GitManager {
+    private static readonly DEFAULT_COMMAND_TIMEOUT_MS;
     private vaultPath;
-    constructor(vaultPath: string);
+    private commandTimeoutMs;
+    private gitExecutable;
+    private gitArgsPrefix;
+    constructor(vaultPath: string, options?: GitManagerOptions);
     /**
      * Check if git is available on the system
      */
@@ -42,6 +51,7 @@ export declare class GitManager {
      */
     getStatus(): GitStatus;
     private git;
+    private getGitEnv;
     private getUnavailableResult;
     private getUnavailableSyncResult;
     private getCommitArgs;
@@ -53,4 +63,5 @@ export declare class GitManager {
     private getConflicts;
     private formatError;
 }
+export {};
 //# sourceMappingURL=git-manager.d.ts.map

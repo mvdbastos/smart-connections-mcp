@@ -6,16 +6,27 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 export class GitManager {
+    static DEFAULT_COMMAND_TIMEOUT_MS = 8_000;
     vaultPath;
-    constructor(vaultPath) {
+    commandTimeoutMs;
+    gitExecutable;
+    gitArgsPrefix;
+    constructor(vaultPath, options = {}) {
         this.vaultPath = vaultPath;
+        this.commandTimeoutMs = options.commandTimeoutMs ?? GitManager.DEFAULT_COMMAND_TIMEOUT_MS;
+        this.gitExecutable = options.gitExecutable ?? 'git';
+        this.gitArgsPrefix = options.gitArgsPrefix ?? [];
     }
     /**
      * Check if git is available on the system
      */
     isGitAvailable() {
         try {
-            execFileSync('git', ['--version'], { stdio: 'pipe' });
+            execFileSync(this.gitExecutable, [...this.gitArgsPrefix, '--version'], {
+                stdio: 'pipe',
+                timeout: this.commandTimeoutMs,
+                env: this.getGitEnv(),
+            });
             return true;
         }
         catch {
@@ -229,11 +240,19 @@ export class GitManager {
         }
     }
     git(args) {
-        return execFileSync('git', args, {
+        return execFileSync(this.gitExecutable, [...this.gitArgsPrefix, ...args], {
             cwd: this.vaultPath,
             stdio: 'pipe',
             encoding: 'utf-8',
+            timeout: this.commandTimeoutMs,
+            env: this.getGitEnv(),
         });
+    }
+    getGitEnv() {
+        return {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: '0',
+        };
     }
     getUnavailableResult() {
         if (!this.isGitAvailable()) {
@@ -348,6 +367,9 @@ export class GitManager {
     formatError(error) {
         if (error instanceof Error) {
             const maybeError = error;
+            if (maybeError.code === 'ETIMEDOUT' || maybeError.signal === 'SIGTERM') {
+                return `Git command timed out after ${this.commandTimeoutMs}ms`;
+            }
             const stderr = maybeError.stderr?.toString().trim();
             return stderr || error.message;
         }

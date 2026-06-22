@@ -143,5 +143,38 @@ describe('GitManager', () => {
         expect(isRepo).toBe(false);
         fs.rmSync(nonGitDir, { recursive: true });
     });
+    it('should time out sync commands instead of hanging', () => {
+        const fakeGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-fake-git-'));
+        const fakeRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-fake-repo-'));
+        const originalPath = process.env.PATH;
+        try {
+            const fakeGitPath = path.join(fakeGitDir, 'fake-git.js');
+            const fakeGitScript = [
+                'const args = process.argv.slice(2);',
+                'if (args[0] === "--version") { console.log("git version 2.0.0"); process.exit(0); }',
+                `if (args[0] === "rev-parse" && args[1] === "--show-toplevel") { console.log(${JSON.stringify(fakeRepoDir)}); process.exit(0); }`,
+                'if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") { console.log("main"); process.exit(0); }',
+                'if (args[0] === "fetch") { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000); process.exit(0); }',
+                'process.exit(0);',
+            ].join('\n');
+            fs.writeFileSync(fakeGitPath, fakeGitScript);
+            process.env.PATH = `${fakeGitDir}${path.delimiter}${originalPath || ''}`;
+            const manager = new GitManager(fakeRepoDir, {
+                commandTimeoutMs: 500,
+                gitExecutable: process.execPath,
+                gitArgsPrefix: [fakeGitPath],
+            });
+            const startedAt = Date.now();
+            const result = manager.syncNotes();
+            expect(Date.now() - startedAt).toBeLessThan(1500);
+            expect(result.success).toBe(false);
+            expect(result.error?.toLowerCase()).toContain('timed out');
+        }
+        finally {
+            process.env.PATH = originalPath;
+            fs.rmSync(fakeGitDir, { recursive: true, force: true });
+            fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+        }
+    });
 });
 //# sourceMappingURL=git-manager.test.js.map
