@@ -17,6 +17,8 @@ import {
 import { z } from 'zod';
 import { SmartConnectionsLoader } from './smart-connections-loader.js';
 import { SearchEngine } from './search-engine.js';
+import { GitManager } from './git-manager.js';
+import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
 
 // Environment variable for vault path
 const VAULT_PATH = process.env.SMART_VAULT_PATH;
@@ -84,6 +86,21 @@ const GetNoteContentSchema = z.object({
 });
 
 const GetStatsSchema = z.object({});
+
+const CommitNotesSchema = z.object({
+  message: z.string().optional().describe('Commit message; auto-generated if omitted'),
+  author_name: z.string().optional().describe('Git author name; uses config if omitted'),
+  author_email: z.string().optional().describe('Git author email; uses config if omitted'),
+});
+
+const CommitNotesSpecificSchema = z.object({
+  note_paths: z.array(z.string()).describe('Paths to notes to commit (relative to vault)'),
+  message: z.string().optional().describe('Commit message; auto-generated if omitted'),
+  author_name: z.string().optional().describe('Git author name; uses config if omitted'),
+  author_email: z.string().optional().describe('Git author email; uses config if omitted'),
+});
+
+const SyncNotesSchema = z.object({});
 
 // Define available tools
 const tools: Tool[] = [
@@ -224,6 +241,62 @@ const tools: Tool[] = [
   {
     name: 'get_stats',
     description: 'Get statistics about the Smart Connections knowledge base (total notes, blocks, embedding model, etc.).',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'commit_notes',
+    description: 'Commit all uncommitted changes to git with an auto-generated or custom message.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Commit message; auto-generated if omitted (e.g., "Updated: note1.md, note2.md")',
+        },
+        author_name: {
+          type: 'string',
+          description: 'Git author name; uses git config user.name if omitted',
+        },
+        author_email: {
+          type: 'string',
+          description: 'Git author email; uses git config user.email if omitted',
+        },
+      },
+    },
+  },
+  {
+    name: 'commit_notes_specific',
+    description: 'Commit specific note files to git.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note_paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Paths to notes to commit (relative to vault root, e.g., ["Note.md", "Folder/Note.md"])',
+        },
+        message: {
+          type: 'string',
+          description: 'Commit message; auto-generated if omitted',
+        },
+        author_name: {
+          type: 'string',
+          description: 'Git author name; uses git config user.name if omitted',
+        },
+        author_email: {
+          type: 'string',
+          description: 'Git author email; uses git config user.email if omitted',
+        },
+      },
+      required: ['note_paths'],
+    },
+  },
+  {
+    name: 'sync_notes',
+    description: 'Sync notes by fetching from remote and pulling changes. Detects and reports merge conflicts.',
     inputSchema: {
       type: 'object',
       properties: {},
