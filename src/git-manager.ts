@@ -55,7 +55,7 @@ export class GitManager {
       }
 
       const topLevel = this.git(['rev-parse', '--show-toplevel']).trim();
-      return path.resolve(topLevel) === path.resolve(this.vaultPath);
+      return this.samePath(topLevel, this.vaultPath);
     } catch {
       return false;
     }
@@ -154,7 +154,7 @@ export class GitManager {
         };
       }
 
-      this.git(this.getCommitArgs(message, authorName, authorEmail));
+      this.git([...this.getCommitArgs(message, authorName, authorEmail), '--only', '--', ...relativePaths]);
       const commitHash = this.git(['rev-parse', '--short', 'HEAD']).trim();
 
       return {
@@ -351,9 +351,26 @@ export class GitManager {
     return relativePath.replace(/\\/g, '/');
   }
 
+  private samePath(left: string, right: string): boolean {
+    const normalize = (value: string): string => {
+      let resolved = path.resolve(value);
+      try {
+        resolved = fs.realpathSync.native(resolved);
+      } catch {
+        // Fall back to lexical normalization when the path does not exist.
+      }
+
+      resolved = resolved.replace(/\\/g, '/');
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    };
+
+    return normalize(left) === normalize(right);
+  }
+
   private getAheadBehind(branch: string): { aheadRemote: number; behindRemote: number } {
     try {
-      const output = this.git(['rev-list', '--left-right', '--count', `origin/${branch}...HEAD`])
+      const upstream = this.getUpstreamRef(branch);
+      const output = this.git(['rev-list', '--left-right', '--count', `${upstream}...HEAD`])
         .trim()
         .split(/\s+/);
 
@@ -379,7 +396,8 @@ export class GitManager {
     }
 
     try {
-      return this.git(['log', `HEAD..origin/${branch}`, '--pretty=%h%x09%s%x09%ct'])
+      const upstream = this.getUpstreamRef(branch);
+      return this.git(['log', `HEAD..${upstream}`, '--pretty=%h%x09%s%x09%ct'])
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
@@ -393,6 +411,14 @@ export class GitManager {
         });
     } catch {
       return [];
+    }
+  }
+
+  private getUpstreamRef(branch: string): string {
+    try {
+      return this.git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']).trim();
+    } catch {
+      return `origin/${branch}`;
     }
   }
 

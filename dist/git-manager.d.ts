@@ -57,9 +57,11 @@ export declare class GitManager {
     private getCommitArgs;
     private getStagedFiles;
     private toRelativePath;
+    private samePath;
     private getAheadBehind;
     private getBehindRemote;
     private getRemoteCommits;
+    private getUpstreamRef;
     private getConflicts;
     private formatError;
 }
