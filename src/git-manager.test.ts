@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { GitManager } from './git-manager.js';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execSync } from 'child_process';
 
 // Use a temporary test directory
-const TEST_DIR = path.join(process.cwd(), '.test-vault');
+let TEST_DIR: string;
 
 describe('GitManager', () => {
   beforeAll(() => {
+    TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-git-'));
+
     // Create test directory
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true });
