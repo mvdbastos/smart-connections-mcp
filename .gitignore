@@ -35,6 +35,7 @@ logs/
 # Testing
 coverage/
 .nyc_output/
+.worktrees/
 
 # Temporary files
 tmp/
