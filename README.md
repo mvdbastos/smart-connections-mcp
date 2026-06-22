@@ -83,6 +83,47 @@ Retrieve full note content or specific sections/blocks with intelligent extracti
 
    The MCP server will automatically start when Claude Desktop launches.
 
+## Open This Server with MCP Inspector
+
+You can run this server directly in the MCP Inspector UI without changing your Claude Desktop config.
+
+### 1. Build the server:
+
+   ```bash
+   npm run build
+   ```
+
+### 2. Start Inspector and launch this server through it.
+
+#### Bash (macOS/Linux/Git Bash)
+
+```bash
+npx -y @modelcontextprotocol/inspector -e SMART_VAULT_PATH="/absolute/path/to/vault" node dist/index.js
+```
+
+#### PowerShell (Windows)
+
+```powershell
+npx -y @modelcontextprotocol/inspector -e SMART_VAULT_PATH="C:/absolute/path/to/vault" node dist/index.js
+```
+
+If you need to pass arguments to your MCP server, use `--` to separate Inspector flags from server arguments:
+
+```bash
+npx -y @modelcontextprotocol/inspector -e SMART_VAULT_PATH="/absolute/path/to/vault" -- node dist/index.js --your-server-arg
+```
+
+#### To build and run in one go (PowerShell):
+
+```powershell
+npm run build; npx -y @modelcontextprotocol/inspector -e SMART_VAULT_PATH="C:/absolute/path/to/vault" node dist/index.js
+```
+
+Notes:
+- Inspector UI runs at `http://localhost:6274` by default.
+- The proxy runs at `http://localhost:6277` by default.
+- Inspector prints a session token on startup and usually opens the browser with the token pre-filled.
+
 ## Available Tools
 
 ### 1. `get_similar_notes`
