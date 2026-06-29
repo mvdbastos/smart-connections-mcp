@@ -119,6 +119,15 @@ export class SmartConnectionsLoader {
   }
 
   /**
+   * Add or replace a source in the in-memory source map.
+   */
+  upsertSource(source: SmartSource): void {
+    if (source && source.path) {
+      this.sources.set(source.path, source);
+    }
+  }
+
+  /**
    * Get configuration
    */
   getConfig(): SmartEnvConfig | null {
