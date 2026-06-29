@@ -152,7 +152,7 @@ describe('GitManager', () => {
       expect(committedFiles).toEqual(['selected.md']);
       expect(stagedFiles).toEqual(['unrelated.md']);
     } finally {
-      fs.rmSync(isolatedDir, { recursive: true, force: true });
+      fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -303,7 +303,7 @@ describe('GitManager', () => {
       expect(result.localFallback).toBe(true);
       expect(result.error?.toLowerCase()).toContain('local');
     } finally {
-      fs.rmSync(isolatedDir, { recursive: true, force: true });
+      fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
