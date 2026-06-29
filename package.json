@@ -25,13 +25,14 @@
   "author": "Daniel Glickman",
   "license": "MIT",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@vitest/ui": "^2.1.2",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.2",
-    "@vitest/ui": "^2.1.2"
+    "vitest": "^2.1.2"
   }
 }
