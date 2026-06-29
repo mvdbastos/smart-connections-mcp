@@ -153,7 +153,34 @@ export class GitManager {
         }
     }
     /**
-     * Sync notes: fetch and pull from remote
+     * Push committed notes to the configured remote, falling back to local-only when remote push is unavailable.
+     */
+    push() {
+        const unavailable = this.getUnavailablePushResult();
+        if (unavailable) {
+            return unavailable;
+        }
+        const branch = this.getBranch();
+        try {
+            this.git(['push']);
+            return {
+                success: true,
+                branch,
+                localFallback: false,
+                message: 'Pushed notes to remote',
+            };
+        }
+        catch (e) {
+            return {
+                success: false,
+                branch,
+                localFallback: true,
+                error: `Remote push unavailable; changes remain committed locally. ${this.formatError(e)}`,
+            };
+        }
+    }
+    /**
+     * Sync notes: fetch and pull from remote, then push local commits.
      */
     syncNotes() {
         const unavailable = this.getUnavailableSyncResult();
@@ -179,11 +206,13 @@ export class GitManager {
                     error: conflicts.length > 0 ? `Merge conflicts detected in: ${conflicts.join(', ')}` : this.formatError(e),
                 };
             }
+            const push = this.push();
             return {
                 success: true,
                 branch,
                 commitsBehind,
                 commits,
+                push,
             };
         }
         catch (e) {
@@ -290,6 +319,25 @@ export class GitManager {
                 commitsBehind: 0,
                 commits: [],
                 error: 'Directory is not a git repository',
+            };
+        }
+        return null;
+    }
+    getUnavailablePushResult() {
+        if (!this.isGitAvailable()) {
+            return {
+                success: false,
+                branch: '',
+                localFallback: true,
+                error: 'Git is not available on this system; changes remain local',
+            };
+        }
+        if (!this.isGitRepository()) {
+            return {
+                success: false,
+                branch: '',
+                localFallback: true,
+                error: 'Directory is not a git repository; changes remain local',
             };
         }
         return null;

@@ -7,30 +7,41 @@
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, GetPromptRequestSchema, ListPromptsRequestSchema, ListResourcesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import { SmartConnectionsLoader } from './smart-connections-loader.js';
 import { SearchEngine } from './search-engine.js';
 import { GitManager } from './git-manager.js';
+import { Embedder } from './embedder.js';
+import { appendSourceVector } from './ajson-writer.js';
+import { createNote, deleteNote, editNote } from './note-writer.js';
+import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
 // Environment variable for vault path
-const VAULT_PATH = process.env.SMART_VAULT_PATH;
-if (!VAULT_PATH) {
+const VAULT_PATH_ENV = process.env.SMART_VAULT_PATH;
+if (!VAULT_PATH_ENV) {
     console.error('Error: SMART_VAULT_PATH environment variable is required');
     console.error('Please set it to your Obsidian vault path, e.g.:');
     console.error('  export SMART_VAULT_PATH="/Users/username/My Vault"');
     process.exit(1);
 }
+const VAULT_ROOT = VAULT_PATH_ENV;
 // Initialize loader
-const loader = new SmartConnectionsLoader(VAULT_PATH);
+const loader = new SmartConnectionsLoader(VAULT_ROOT);
 await loader.initialize();
 // Create search engine after loader is initialized
 const searchEngine = new SearchEngine(loader);
+// Initialize local embedder for query search and write-time note embeddings.
+const embedder = new Embedder();
+await embedder.tryInit();
+searchEngine.setEmbedder(embedder);
 // Initialize git manager for the vault
-const gitManager = new GitManager(VAULT_PATH);
+const gitManager = new GitManager(VAULT_ROOT);
 console.error('Smart Connections MCP Server initialized successfully');
-console.error(`Vault: ${VAULT_PATH}`);
+console.error(`Vault: ${VAULT_ROOT}`);
 console.error(`Loaded ${loader.getSources().size} notes`);
 // Create MCP server
 const server = new Server({
@@ -39,6 +50,8 @@ const server = new Server({
 }, {
     capabilities: {
         tools: {},
+        resources: {},
+        prompts: {},
     },
 });
 // Define tool schemas
@@ -79,7 +92,40 @@ const CommitNotesSpecificSchema = z.object({
     author_name: z.string().optional().describe('Git author name; uses config if omitted'),
     author_email: z.string().optional().describe('Git author email; uses config if omitted'),
 });
+const CreateNoteSchema = z.object({
+    note_path: z.string().describe('Path for the new note, relative to the vault'),
+    content: z.string().describe('Markdown content to write'),
+    frontmatter: z.record(z.unknown()).optional().describe('Optional frontmatter fields'),
+});
+const EditNoteSchema = z.object({
+    note_path: z.string().describe('Path to the note, relative to the vault'),
+    content: z.string().describe('Markdown content to write or append'),
+    mode: z.enum(['overwrite', 'append', 'append-section']).default('append').describe('Edit mode'),
+    heading: z.string().optional().describe('Heading used for append-section mode'),
+});
+const DeleteNoteSchema = z.object({
+    note_path: z.string().describe('Path to the note, relative to the vault'),
+});
 const SyncNotesSchema = z.object({});
+async function embedUpdatedNote(notePath) {
+    if (!embedder.isAvailable()) {
+        return { embedded: false, error: 'Embedder unavailable; note write succeeded without vector update' };
+    }
+    try {
+        const fullPath = path.join(VAULT_ROOT, notePath);
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        const vec = await embedder.embed(content);
+        const hash = createHash('sha256').update(content).digest('hex');
+        const tokens = content.trim().length === 0 ? 0 : content.trim().split(/\s+/).length;
+        const source = appendSourceVector(VAULT_ROOT, notePath, vec, loader.getEmbeddingModelKey(), hash, tokens);
+        loader.upsertSource(source);
+        return { embedded: true };
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { embedded: false, error: message };
+    }
+}
 // Define available tools
 const tools = [
     {
@@ -225,6 +271,49 @@ const tools = [
         },
     },
     {
+        name: 'create_note',
+        description: 'Create a new markdown note in the vault and update its local embedding when available.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                note_path: { type: 'string', description: 'Path for the new note, relative to vault root' },
+                content: { type: 'string', description: 'Markdown content to write' },
+                frontmatter: { type: 'object', description: 'Optional frontmatter fields' },
+            },
+            required: ['note_path', 'content'],
+        },
+    },
+    {
+        name: 'edit_note',
+        description: 'Edit a markdown note using overwrite, append, or append-section mode and update its local embedding when available.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                note_path: { type: 'string', description: 'Path to the note, relative to vault root' },
+                content: { type: 'string', description: 'Markdown content to write or append' },
+                mode: {
+                    type: 'string',
+                    enum: ['overwrite', 'append', 'append-section'],
+                    default: 'append',
+                    description: 'Edit mode',
+                },
+                heading: { type: 'string', description: 'Heading to add in append-section mode' },
+            },
+            required: ['note_path', 'content'],
+        },
+    },
+    {
+        name: 'delete_note',
+        description: 'Delete a markdown note from the vault.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                note_path: { type: 'string', description: 'Path to the note, relative to vault root' },
+            },
+            required: ['note_path'],
+        },
+    },
+    {
         name: 'git_commit_notes',
         description: 'Commit all uncommitted changes to git with an auto-generated or custom message.',
         inputSchema: {
@@ -273,8 +362,16 @@ const tools = [
         },
     },
     {
+        name: 'git_push_notes',
+        description: 'Push committed note changes to the configured git remote, with a local fallback when remote push is unavailable.',
+        inputSchema: {
+            type: 'object',
+            properties: {},
+        },
+    },
+    {
         name: 'git_sync_notes',
-        description: 'Sync notes by fetching from remote and pulling changes. Detects and reports merge conflicts.',
+        description: 'Sync notes by fetching, pulling, then pushing changes. Detects and reports merge conflicts.',
         inputSchema: {
             type: 'object',
             properties: {},
@@ -285,6 +382,57 @@ console.error(`Registered ${tools.length} tools: ${tools.map((tool) => tool.name
 // Handle tool list requests
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools };
+});
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return {
+        resources: MEMORY_GUIDES.map((guide) => ({
+            uri: guide.uri,
+            name: guide.name,
+            description: guide.description,
+            mimeType: 'text/markdown',
+        })),
+    };
+});
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const guide = MEMORY_GUIDE_BY_URI.get(request.params.uri);
+    if (!guide) {
+        throw new Error(`Unknown resource: ${request.params.uri}`);
+    }
+    return {
+        contents: [
+            {
+                uri: guide.uri,
+                mimeType: 'text/markdown',
+                text: guide.text,
+            },
+        ],
+    };
+});
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+        prompts: MEMORY_PROMPTS.map((prompt) => ({
+            name: prompt.name,
+            description: prompt.description,
+        })),
+    };
+});
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const prompt = MEMORY_PROMPTS.find((item) => item.name === request.params.name);
+    if (!prompt) {
+        throw new Error(`Unknown prompt: ${request.params.name}`);
+    }
+    return {
+        description: prompt.description,
+        messages: [
+            {
+                role: 'user',
+                content: {
+                    type: 'text',
+                    text: prompt.text,
+                },
+            },
+        ],
+    };
 });
 // Handle tool execution requests
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -317,7 +465,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
             case 'search_notes': {
                 const { query, limit, threshold } = SearchNotesSchema.parse(args);
-                const results = searchEngine.searchByQuery(query, limit, threshold);
+                const results = await searchEngine.searchByQuery(query, limit, threshold);
                 return {
                     content: [
                         {
@@ -351,13 +499,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            case 'create_note': {
+                const { note_path, content, frontmatter } = CreateNoteSchema.parse(args);
+                createNote(VAULT_ROOT, note_path, content, frontmatter);
+                const embedding = await embedUpdatedNote(note_path);
+                const result = { success: true, note_path, ...embedding };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                };
+            }
+            case 'edit_note': {
+                const { note_path, content, mode, heading } = EditNoteSchema.parse(args);
+                editNote(VAULT_ROOT, note_path, content, mode, heading);
+                const embedding = await embedUpdatedNote(note_path);
+                const result = { success: true, note_path, mode, ...embedding };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                };
+            }
+            case 'delete_note': {
+                const { note_path } = DeleteNoteSchema.parse(args);
+                deleteNote(VAULT_ROOT, note_path);
+                const result = { success: true, note_path };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                };
+            }
             case 'git_commit_notes': {
                 const { message, author_name, author_email } = CommitNotesSchema.parse(args);
                 let commitMessage = message;
                 if (!commitMessage) {
                     try {
                         const statusOutput = execFileSync('git', ['status', '--short'], {
-                            cwd: VAULT_PATH,
+                            cwd: VAULT_ROOT,
                             stdio: 'pipe',
                             encoding: 'utf-8',
                         });
@@ -391,8 +580,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     const suffix = note_paths.length > 3 ? ` (+${note_paths.length - 3} more)` : '';
                     commitMessage = `Updated: ${noteList}${suffix}`;
                 }
-                const absolutePaths = note_paths.map((notePath) => path.join(VAULT_PATH, notePath));
+                const absolutePaths = note_paths.map((notePath) => path.join(VAULT_ROOT, notePath));
                 const result = gitManager.commitSpecific(absolutePaths, commitMessage, author_name, author_email);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                    isError: !result.success,
+                };
+            }
+            case 'git_push_notes': {
+                SyncNotesSchema.parse(args);
+                const result = gitManager.push();
                 return {
                     content: [
                         {

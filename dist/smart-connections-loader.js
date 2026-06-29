@@ -99,6 +99,14 @@ export class SmartConnectionsLoader {
         return this.sources.get(notePath);
     }
     /**
+     * Add or replace a source in the in-memory source map.
+     */
+    upsertSource(source) {
+        if (source && source.path) {
+            this.sources.set(source.path, source);
+        }
+    }
+    /**
      * Get configuration
      */
     getConfig() {

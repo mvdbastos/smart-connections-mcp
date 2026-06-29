@@ -3,10 +3,13 @@
  */
 import type { SimilarNote, ConnectionGraph, NoteContent } from './types.js';
 import type { SmartConnectionsLoader } from './smart-connections-loader.js';
+import type { Embedder } from './embedder.js';
 export declare class SearchEngine {
     private loader;
     private embeddingModelKey;
+    private embedder;
     constructor(loader: SmartConnectionsLoader);
+    setEmbedder(embedder: Pick<Embedder, 'embed' | 'isAvailable'>): void;
     /**
      * Find similar notes to a given note path
      */
@@ -22,7 +25,7 @@ export declare class SearchEngine {
     /**
      * Search notes by content similarity
      */
-    searchByQuery(queryText: string, limit?: number, threshold?: number): SimilarNote[];
+    searchByQuery(queryText: string, limit?: number, threshold?: number): Promise<SimilarNote[]>;
     /**
      * Get note content with matched blocks highlighted
      */

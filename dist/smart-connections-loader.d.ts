@@ -29,6 +29,10 @@ export declare class SmartConnectionsLoader {
      */
     getSource(notePath: string): SmartSource | undefined;
     /**
+     * Add or replace a source in the in-memory source map.
+     */
+    upsertSource(source: SmartSource): void;
+    /**
      * Get configuration
      */
     getConfig(): SmartEnvConfig | null;

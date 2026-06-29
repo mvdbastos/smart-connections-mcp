@@ -2,7 +2,7 @@
  * Git Manager for Smart Connections MCP
  * Handles all git operations (commit, fetch, pull, status)
  */
-import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
+import type { GitCommitResult, GitPushResult, GitSyncResult, GitStatus } from './types.js';
 interface GitManagerOptions {
     commandTimeoutMs?: number;
     gitExecutable?: string;
@@ -43,7 +43,11 @@ export declare class GitManager {
      */
     commitSpecific(filePaths: string[], message: string, authorName?: string, authorEmail?: string): GitCommitResult;
     /**
-     * Sync notes: fetch and pull from remote
+     * Push committed notes to the configured remote, falling back to local-only when remote push is unavailable.
+     */
+    push(): GitPushResult;
+    /**
+     * Sync notes: fetch and pull from remote, then push local commits.
      */
     syncNotes(): GitSyncResult;
     /**
@@ -54,6 +58,7 @@ export declare class GitManager {
     private getGitEnv;
     private getUnavailableResult;
     private getUnavailableSyncResult;
+    private getUnavailablePushResult;
     private getCommitArgs;
     private getStagedFiles;
     private toRelativePath;

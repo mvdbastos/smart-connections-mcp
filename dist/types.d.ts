@@ -89,6 +89,16 @@ export interface GitCommitResult {
     error?: string;
 }
 /**
+ * Result of a git push operation
+ */
+export interface GitPushResult {
+    success: boolean;
+    branch: string;
+    localFallback: boolean;
+    message?: string;
+    error?: string;
+}
+/**
  * Result of a git sync (fetch + pull) operation
  */
 export interface GitSyncResult {
@@ -101,6 +111,7 @@ export interface GitSyncResult {
         timestamp: number;
     }>;
     conflicts?: string[];
+    push?: GitPushResult;
     error?: string;
 }
 /**

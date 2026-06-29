@@ -134,7 +134,7 @@ describe('GitManager', () => {
             expect(stagedFiles).toEqual(['unrelated.md']);
         }
         finally {
-            fs.rmSync(isolatedDir, { recursive: true, force: true });
+            fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         }
     });
     it('should return error when git is not available', () => {
@@ -243,6 +243,60 @@ describe('GitManager', () => {
             const status = manager.getStatus();
             expect(status.behindRemote).toBe(2);
             expect(status.aheadRemote).toBe(1);
+        }
+        finally {
+            fs.rmSync(fakeGitDir, { recursive: true, force: true });
+            fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+        }
+    });
+    it('should return local fallback when pushing without a remote', () => {
+        const isolatedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-push-'));
+        try {
+            execSync('git init', { cwd: isolatedDir, stdio: 'pipe' });
+            execSync('git config user.email "test@example.com"', { cwd: isolatedDir, stdio: 'pipe' });
+            execSync('git config user.name "Test User"', { cwd: isolatedDir, stdio: 'pipe' });
+            fs.writeFileSync(path.join(isolatedDir, 'initial.md'), 'initial');
+            execSync('git add initial.md', { cwd: isolatedDir, stdio: 'pipe' });
+            execSync('git commit -m "Initial commit"', { cwd: isolatedDir, stdio: 'pipe' });
+            const manager = new GitManager(isolatedDir);
+            const result = manager.push();
+            expect(result.success).toBe(false);
+            expect(result.localFallback).toBe(true);
+            expect(result.error?.toLowerCase()).toContain('local');
+        }
+        finally {
+            fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        }
+    });
+    it('should push after pulling during sync', () => {
+        const fakeGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-sync-push-git-'));
+        const fakeRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-sync-push-repo-'));
+        try {
+            const logPath = path.join(fakeGitDir, 'calls.log');
+            const fakeGitPath = path.join(fakeGitDir, 'fake-git.js');
+            const fakeGitScript = [
+                'const fs = require("fs");',
+                'const args = process.argv.slice(2);',
+                'const joined = args.join(" ");',
+                `fs.appendFileSync(${JSON.stringify(logPath)}, joined + "\\n");`,
+                'if (args[0] === "--version") { console.log("git version 2.0.0"); process.exit(0); }',
+                `if (joined === "rev-parse --show-toplevel") { console.log(${JSON.stringify(fakeRepoDir)}); process.exit(0); }`,
+                'if (joined === "rev-parse --abbrev-ref HEAD") { console.log("main"); process.exit(0); }',
+                'if (joined === "rev-parse --abbrev-ref --symbolic-full-name @{upstream}") { console.log("origin/main"); process.exit(0); }',
+                'if (joined === "rev-list --left-right --count origin/main...HEAD") { console.log("0\\t0"); process.exit(0); }',
+                'if (joined === "fetch") { process.exit(0); }',
+                'if (joined === "pull") { process.exit(0); }',
+                'if (joined === "push") { process.exit(0); }',
+                'process.exit(0);',
+            ].join('\n');
+            fs.writeFileSync(fakeGitPath, fakeGitScript);
+            const manager = new GitManager(fakeRepoDir, {
+                gitExecutable: process.execPath,
+                gitArgsPrefix: [fakeGitPath],
+            });
+            const result = manager.syncNotes();
+            expect(result.success).toBe(true);
+            expect(fs.readFileSync(logPath, 'utf-8')).toContain('push');
         }
         finally {
             fs.rmSync(fakeGitDir, { recursive: true, force: true });

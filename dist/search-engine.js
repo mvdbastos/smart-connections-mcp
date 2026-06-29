@@ -5,9 +5,13 @@ import { findNearestNeighbors } from './embedding-utils.js';
 export class SearchEngine {
     loader;
     embeddingModelKey;
+    embedder = null;
     constructor(loader) {
         this.loader = loader;
         this.embeddingModelKey = loader.getEmbeddingModelKey();
+    }
+    setEmbedder(embedder) {
+        this.embedder = embedder;
     }
     /**
      * Find similar notes to a given note path
@@ -116,17 +120,24 @@ export class SearchEngine {
     /**
      * Search notes by content similarity
      */
-    searchByQuery(queryText, limit = 10, threshold = 0.5) {
-        // For now, we'll do a simple keyword match since we don't have
-        // a way to generate embeddings for arbitrary text without the model.
-        // In a full implementation, you'd call the embedding model here.
+    async searchByQuery(queryText, limit = 10, threshold = 0.5) {
+        if (this.embedder?.isAvailable()) {
+            try {
+                const embeddingVector = await this.embedder.embed(queryText);
+                return this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+            }
+            catch {
+                // Fall back to keyword search if local embedding fails at query time.
+            }
+        }
         const results = [];
         const queryLower = queryText.toLowerCase();
+        const escapedQuery = queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         for (const [path, source] of this.loader.getSources()) {
             try {
                 const content = this.loader.readNoteContent(path).toLowerCase();
                 // Simple relevance scoring based on keyword matches
-                const matches = (content.match(new RegExp(queryLower, 'gi')) || []).length;
+                const matches = (content.match(new RegExp(escapedQuery, 'gi')) || []).length;
                 if (matches > 0) {
                     // Normalize score (this is a crude approximation)
                     const score = Math.min(matches / 10, 1.0);
