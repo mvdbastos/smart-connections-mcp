@@ -11,7 +11,11 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { execFileSync } from 'child_process';
@@ -25,6 +29,7 @@ import { GitManager } from './git-manager.js';
 import { Embedder } from './embedder.js';
 import { appendSourceVector } from './ajson-writer.js';
 import { createNote, deleteNote, editNote } from './note-writer.js';
+import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
 import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
 
 // Environment variable for vault path
@@ -67,6 +72,8 @@ const server = new Server(
   {
     capabilities: {
       tools: {},
+      resources: {},
+      prompts: {},
     },
   }
 );
@@ -414,6 +421,65 @@ console.error(`Registered ${tools.length} tools: ${tools.map((tool) => tool.name
 // Handle tool list requests
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
+});
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: MEMORY_GUIDES.map((guide) => ({
+      uri: guide.uri,
+      name: guide.name,
+      description: guide.description,
+      mimeType: 'text/markdown',
+    })),
+  };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const guide = MEMORY_GUIDE_BY_URI.get(request.params.uri);
+
+  if (!guide) {
+    throw new Error(`Unknown resource: ${request.params.uri}`);
+  }
+
+  return {
+    contents: [
+      {
+        uri: guide.uri,
+        mimeType: 'text/markdown',
+        text: guide.text,
+      },
+    ],
+  };
+});
+
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  return {
+    prompts: MEMORY_PROMPTS.map((prompt) => ({
+      name: prompt.name,
+      description: prompt.description,
+    })),
+  };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const prompt = MEMORY_PROMPTS.find((item) => item.name === request.params.name);
+
+  if (!prompt) {
+    throw new Error(`Unknown prompt: ${request.params.name}`);
+  }
+
+  return {
+    description: prompt.description,
+    messages: [
+      {
+        role: 'user',
+        content: {
+          type: 'text',
+          text: prompt.text,
+        },
+      },
+    ],
+  };
 });
 
 // Handle tool execution requests
