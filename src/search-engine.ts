@@ -5,14 +5,20 @@
 import type { SmartSource, SimilarNote, ConnectionNode, ConnectionGraph, NoteContent } from './types.js';
 import { cosineSimilarity, findNearestNeighbors } from './embedding-utils.js';
 import type { SmartConnectionsLoader } from './smart-connections-loader.js';
+import type { Embedder } from './embedder.js';
 
 export class SearchEngine {
   private loader: SmartConnectionsLoader;
   private embeddingModelKey: string;
+  private embedder: Pick<Embedder, 'embed' | 'isAvailable'> | null = null;
 
   constructor(loader: SmartConnectionsLoader) {
     this.loader = loader;
     this.embeddingModelKey = loader.getEmbeddingModelKey();
+  }
+
+  setEmbedder(embedder: Pick<Embedder, 'embed' | 'isAvailable'>): void {
+    this.embedder = embedder;
   }
 
   /**
@@ -174,24 +180,30 @@ export class SearchEngine {
   /**
    * Search notes by content similarity
    */
-  searchByQuery(
+  async searchByQuery(
     queryText: string,
     limit: number = 10,
     threshold: number = 0.5
-  ): SimilarNote[] {
-    // For now, we'll do a simple keyword match since we don't have
-    // a way to generate embeddings for arbitrary text without the model.
-    // In a full implementation, you'd call the embedding model here.
+  ): Promise<SimilarNote[]> {
+    if (this.embedder?.isAvailable()) {
+      try {
+        const embeddingVector = await this.embedder.embed(queryText);
+        return this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+      } catch {
+        // Fall back to keyword search if local embedding fails at query time.
+      }
+    }
 
     const results: SimilarNote[] = [];
     const queryLower = queryText.toLowerCase();
+    const escapedQuery = queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     for (const [path, source] of this.loader.getSources()) {
       try {
         const content = this.loader.readNoteContent(path).toLowerCase();
 
         // Simple relevance scoring based on keyword matches
-        const matches = (content.match(new RegExp(queryLower, 'gi')) || []).length;
+        const matches = (content.match(new RegExp(escapedQuery, 'gi')) || []).length;
 
         if (matches > 0) {
           // Normalize score (this is a crude approximation)
