@@ -25,6 +25,11 @@ Direct access to embedding-based similarity calculations using cosine similarity
 ### 📝 Content Access
 Retrieve full note content or specific sections/blocks with intelligent extraction based on Smart Connections block mappings.
 
+Note paths are resolved tolerantly for indexed notes: callers may omit `.md`, use different casing, or provide a unique title basename instead of the full folder path.
+
+### ✏️ Safe Note Editing
+Preview localized edits with `dry_run` before writing. `edit_note` supports full overwrite/append modes plus targeted `replace` and `insert-after-heading` operations.
+
 ## Installation
 
 ### Prerequisites
@@ -222,7 +227,7 @@ Find nearest neighbors for a given embedding vector (advanced use).
 Retrieve full note content with optional block extraction.
 
 **Parameters:**
-- `note_path` (string, required): Path to the note
+- `note_path` (string, required): Path to the note. For indexed notes, you may omit `.md` or provide a unique title basename.
 - `include_blocks` (string[], optional): Specific block headings to extract
 
 **Example:**
@@ -244,7 +249,75 @@ Retrieve full note content with optional block extraction.
 }
 ```
 
-### 6. `get_stats`
+### 6. `edit_note`
+
+Edit a markdown note. Use `dry_run: true` to preview the unified diff and hashes without writing.
+
+**Parameters:**
+- `note_path` (string, required): Path to the note, relative to vault root
+- `content` (string, required): Markdown content to write, append, insert, or use as replacement text
+- `mode` (string, optional): `overwrite`, `append`, `append-section`, `replace`, or `insert-after-heading`; default `append`
+- `heading` (string, optional): Heading for `append-section` or `insert-after-heading`
+- `find` (string, optional): Required for `replace`; literal text by default
+- `regex` (boolean, optional): Treat `find` as a regular expression
+- `count` (number, optional): Maximum number of replacements
+- `dry_run` (boolean, optional): Return diff and hashes without writing
+
+**Read → preview → write → commit recipe:**
+
+1. Read the current note content:
+
+```json
+{
+  "tool": "get_note_content",
+  "arguments": {
+    "note_path": "Project Plan"
+  }
+}
+```
+
+2. Preview the targeted edit:
+
+```json
+{
+  "tool": "edit_note",
+  "arguments": {
+    "note_path": "Project Plan",
+    "mode": "replace",
+    "find": "old wording",
+    "content": "new wording",
+    "dry_run": true
+  }
+}
+```
+
+3. Review the returned `diff`, then write the same edit with `dry_run: false` or omitted:
+
+```json
+{
+  "tool": "edit_note",
+  "arguments": {
+    "note_path": "Project Plan",
+    "mode": "replace",
+    "find": "old wording",
+    "content": "new wording"
+  }
+}
+```
+
+4. Commit only the changed note:
+
+```json
+{
+  "tool": "git_commit_notes_specific",
+  "arguments": {
+    "note_paths": ["Project Plan.md"],
+    "message": "Update project plan wording"
+  }
+}
+```
+
+### 7. `get_stats`
 
 Get statistics about the knowledge base.
 
