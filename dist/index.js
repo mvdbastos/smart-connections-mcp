@@ -20,6 +20,7 @@ import { Embedder } from './embedder.js';
 import { appendSourceVector } from './ajson-writer.js';
 import { createNote, deleteNote, editNote } from './note-writer.js';
 import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
+import { EditNoteSchema, formatToolError } from './tool-schemas.js';
 // Environment variable for vault path
 const VAULT_PATH_ENV = process.env.SMART_VAULT_PATH;
 if (!VAULT_PATH_ENV) {
@@ -96,12 +97,6 @@ const CreateNoteSchema = z.object({
     note_path: z.string().describe('Path for the new note, relative to the vault'),
     content: z.string().describe('Markdown content to write'),
     frontmatter: z.record(z.unknown()).optional().describe('Optional frontmatter fields'),
-});
-const EditNoteSchema = z.object({
-    note_path: z.string().describe('Path to the note, relative to the vault'),
-    content: z.string().describe('Markdown content to write or append'),
-    mode: z.enum(['overwrite', 'append', 'append-section']).default('append').describe('Edit mode'),
-    heading: z.string().optional().describe('Heading used for append-section mode'),
 });
 const DeleteNoteSchema = z.object({
     note_path: z.string().describe('Path to the note, relative to the vault'),
@@ -285,19 +280,23 @@ const tools = [
     },
     {
         name: 'edit_note',
-        description: 'Edit a markdown note using overwrite, append, or append-section mode and update its local embedding when available.',
+        description: 'Edit a markdown note using overwrite, append, append-section, replace, or insert-after-heading mode. Supports dry_run previews with a unified diff before writing.',
         inputSchema: {
             type: 'object',
             properties: {
                 note_path: { type: 'string', description: 'Path to the note, relative to vault root' },
-                content: { type: 'string', description: 'Markdown content to write or append' },
+                content: { type: 'string', description: 'Markdown content to write, append, insert, or use as replacement text' },
                 mode: {
                     type: 'string',
-                    enum: ['overwrite', 'append', 'append-section'],
+                    enum: ['overwrite', 'append', 'append-section', 'replace', 'insert-after-heading'],
                     default: 'append',
-                    description: 'Edit mode',
+                    description: 'Edit mode. replace requires find; insert-after-heading requires heading.',
                 },
-                heading: { type: 'string', description: 'Heading to add in append-section mode' },
+                heading: { type: 'string', description: 'Heading to add in append-section mode or locate in insert-after-heading mode' },
+                find: { type: 'string', description: 'Literal text or regex pattern to find in replace mode' },
+                regex: { type: 'boolean', description: 'Treat find as a regular expression in replace mode' },
+                count: { type: 'number', description: 'Maximum number of replacements in replace mode', minimum: 1 },
+                dry_run: { type: 'boolean', description: 'Return diff and hashes without writing the file' },
             },
             required: ['note_path', 'content'],
         },
@@ -514,10 +513,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 };
             }
             case 'edit_note': {
-                const { note_path, content, mode, heading } = EditNoteSchema.parse(args);
-                editNote(VAULT_ROOT, note_path, content, mode, heading);
-                const embedding = await embedUpdatedNote(note_path);
-                const result = { success: true, note_path, mode, ...embedding };
+                const { note_path, content, mode, heading, find, regex, count, dry_run } = EditNoteSchema.parse(args);
+                const options = {
+                    mode,
+                    content,
+                    heading,
+                    find,
+                    regex,
+                    count,
+                    dryRun: dry_run,
+                };
+                const editResult = editNote(VAULT_ROOT, note_path, options);
+                const embedding = editResult.written && editResult.changed ? await embedUpdatedNote(note_path) : undefined;
+                const result = embedding ? { ...editResult, embedding } : editResult;
                 return {
                     content: [
                         {
@@ -643,7 +651,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
     }
     catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = formatToolError(name, error);
         return {
             content: [
                 {
