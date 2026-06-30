@@ -8,14 +8,18 @@ import { execSync } from 'child_process';
 // Use a temporary test directory
 let TEST_DIR: string;
 
+function removeTempDir(dir: string): void {
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  }
+}
+
 describe('GitManager', () => {
   beforeAll(() => {
     TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-git-'));
 
     // Create test directory
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true });
-    }
+    removeTempDir(TEST_DIR);
     fs.mkdirSync(TEST_DIR, { recursive: true });
 
     // Initialize a git repo
@@ -30,9 +34,7 @@ describe('GitManager', () => {
 
   afterAll(() => {
     // Cleanup
-    if (fs.existsSync(TEST_DIR)) {
-      fs.rmSync(TEST_DIR, { recursive: true });
-    }
+    removeTempDir(TEST_DIR);
   });
 
   it('should detect when git is available', () => {
@@ -152,7 +154,7 @@ describe('GitManager', () => {
       expect(committedFiles).toEqual(['selected.md']);
       expect(stagedFiles).toEqual(['unrelated.md']);
     } finally {
-      fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(isolatedDir);
     }
   });
 
@@ -205,7 +207,7 @@ describe('GitManager', () => {
     const isRepo = manager.isGitRepository();
     expect(isRepo).toBe(false);
 
-    fs.rmSync(nonGitDir, { recursive: true });
+    removeTempDir(nonGitDir);
   });
 
   it('should time out sync commands instead of hanging', () => {
@@ -241,8 +243,8 @@ describe('GitManager', () => {
       expect(result.error?.toLowerCase()).toContain('timed out');
     } finally {
       process.env.PATH = originalPath;
-      fs.rmSync(fakeGitDir, { recursive: true, force: true });
-      fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+      removeTempDir(fakeGitDir);
+      removeTempDir(fakeRepoDir);
     }
   });
 
@@ -280,8 +282,8 @@ describe('GitManager', () => {
       expect(status.behindRemote).toBe(2);
       expect(status.aheadRemote).toBe(1);
     } finally {
-      fs.rmSync(fakeGitDir, { recursive: true, force: true });
-      fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+      removeTempDir(fakeGitDir);
+      removeTempDir(fakeRepoDir);
     }
   });
 
@@ -303,7 +305,7 @@ describe('GitManager', () => {
       expect(result.localFallback).toBe(true);
       expect(result.error?.toLowerCase()).toContain('local');
     } finally {
-      fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTempDir(isolatedDir);
     }
   });
 
@@ -341,8 +343,8 @@ describe('GitManager', () => {
       expect(result.success).toBe(true);
       expect(fs.readFileSync(logPath, 'utf-8')).toContain('push');
     } finally {
-      fs.rmSync(fakeGitDir, { recursive: true, force: true });
-      fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+      removeTempDir(fakeGitDir);
+      removeTempDir(fakeRepoDir);
     }
   });
 });

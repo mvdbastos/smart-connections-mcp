@@ -6,13 +6,16 @@ import * as path from 'path';
 import { execSync } from 'child_process';
 // Use a temporary test directory
 let TEST_DIR;
+function removeTempDir(dir) {
+    if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    }
+}
 describe('GitManager', () => {
     beforeAll(() => {
         TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-git-'));
         // Create test directory
-        if (fs.existsSync(TEST_DIR)) {
-            fs.rmSync(TEST_DIR, { recursive: true });
-        }
+        removeTempDir(TEST_DIR);
         fs.mkdirSync(TEST_DIR, { recursive: true });
         // Initialize a git repo
         try {
@@ -26,9 +29,7 @@ describe('GitManager', () => {
     });
     afterAll(() => {
         // Cleanup
-        if (fs.existsSync(TEST_DIR)) {
-            fs.rmSync(TEST_DIR, { recursive: true });
-        }
+        removeTempDir(TEST_DIR);
     });
     it('should detect when git is available', () => {
         const manager = new GitManager(TEST_DIR);
@@ -134,7 +135,7 @@ describe('GitManager', () => {
             expect(stagedFiles).toEqual(['unrelated.md']);
         }
         finally {
-            fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            removeTempDir(isolatedDir);
         }
     });
     it('should return error when git is not available', () => {
@@ -180,7 +181,7 @@ describe('GitManager', () => {
         const manager = new GitManager(nonGitDir);
         const isRepo = manager.isGitRepository();
         expect(isRepo).toBe(false);
-        fs.rmSync(nonGitDir, { recursive: true });
+        removeTempDir(nonGitDir);
     });
     it('should time out sync commands instead of hanging', () => {
         const fakeGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-fake-git-'));
@@ -211,8 +212,8 @@ describe('GitManager', () => {
         }
         finally {
             process.env.PATH = originalPath;
-            fs.rmSync(fakeGitDir, { recursive: true, force: true });
-            fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+            removeTempDir(fakeGitDir);
+            removeTempDir(fakeRepoDir);
         }
     });
     it('should use the configured upstream instead of origin branch for status', () => {
@@ -245,8 +246,8 @@ describe('GitManager', () => {
             expect(status.aheadRemote).toBe(1);
         }
         finally {
-            fs.rmSync(fakeGitDir, { recursive: true, force: true });
-            fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+            removeTempDir(fakeGitDir);
+            removeTempDir(fakeRepoDir);
         }
     });
     it('should return local fallback when pushing without a remote', () => {
@@ -265,7 +266,7 @@ describe('GitManager', () => {
             expect(result.error?.toLowerCase()).toContain('local');
         }
         finally {
-            fs.rmSync(isolatedDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            removeTempDir(isolatedDir);
         }
     });
     it('should push after pulling during sync', () => {
@@ -299,8 +300,8 @@ describe('GitManager', () => {
             expect(fs.readFileSync(logPath, 'utf-8')).toContain('push');
         }
         finally {
-            fs.rmSync(fakeGitDir, { recursive: true, force: true });
-            fs.rmSync(fakeRepoDir, { recursive: true, force: true });
+            removeTempDir(fakeGitDir);
+            removeTempDir(fakeRepoDir);
         }
     });
 });
