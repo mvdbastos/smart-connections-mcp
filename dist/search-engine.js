@@ -27,7 +27,7 @@ export class SearchEngine {
         }
         // Build vector dataset from all sources
         const vectors = Array.from(this.loader.getSources().entries())
-            .filter(([path]) => path !== notePath) // Exclude the query note itself
+            .filter(([path]) => path !== source.path) // Exclude the query note itself
             .map(([path, src]) => {
             const emb = src.embeddings[this.embeddingModelKey];
             return {
@@ -168,7 +168,7 @@ export class SearchEngine {
         const source = this.loader.getSource(notePath);
         const availableBlocks = source ? Object.keys(source.blocks || {}) : [];
         return {
-            path: notePath,
+            path: source?.path ?? notePath,
             content,
             blocks: availableBlocks
         };

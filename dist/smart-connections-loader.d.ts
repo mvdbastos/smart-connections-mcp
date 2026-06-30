@@ -29,6 +29,12 @@ export declare class SmartConnectionsLoader {
      */
     getSource(notePath: string): SmartSource | undefined;
     /**
+     * Resolve a caller-provided note path to the canonical indexed source path.
+     */
+    resolveNotePath(notePath: string): string;
+    private closestSourcePaths;
+    private levenshtein;
+    /**
      * Add or replace a source in the in-memory source map.
      */
     upsertSource(source: SmartSource): void;
