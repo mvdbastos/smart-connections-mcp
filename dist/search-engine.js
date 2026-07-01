@@ -124,7 +124,10 @@ export class SearchEngine {
         if (this.embedder?.isAvailable()) {
             try {
                 const embeddingVector = await this.embedder.embed(queryText);
-                return this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+                const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+                if (semanticResults.length > 0) {
+                    return semanticResults;
+                }
             }
             catch {
                 // Fall back to keyword search if local embedding fails at query time.
@@ -139,8 +142,8 @@ export class SearchEngine {
                 // Simple relevance scoring based on keyword matches
                 const matches = (content.match(new RegExp(escapedQuery, 'gi')) || []).length;
                 if (matches > 0) {
-                    // Normalize score (this is a crude approximation)
-                    const score = Math.min(matches / 10, 1.0);
+                    // Normalize score so one exact keyword hit is discoverable at the default threshold.
+                    const score = Math.min(matches / (matches + 1), 1.0);
                     if (score >= threshold) {
                         results.push({
                             path,

@@ -8,7 +8,15 @@ import { execSync } from 'child_process';
 let TEST_DIR;
 function removeTempDir(dir) {
     if (fs.existsSync(dir)) {
-        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+        try {
+            fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+        }
+        catch (error) {
+            const code = error.code;
+            if (code !== 'EBUSY' && code !== 'EPERM') {
+                throw error;
+            }
+        }
     }
 }
 describe('GitManager', () => {

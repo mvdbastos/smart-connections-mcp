@@ -58,4 +58,43 @@ describe('SearchEngine searchByQuery', () => {
     expect(results).toHaveLength(1);
     expect(results[0].path).toBe('match.md');
   });
+
+  it('returns a keyword match at the default threshold', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0])],
+      ['miss.md', source('miss.md', [0])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: (notePath: string) => (notePath === 'match.md' ? 'alpha' : 'beta'),
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('alpha');
+
+    expect(results.map((result) => result.path)).toEqual(['match.md']);
+  });
+
+  it('falls back to keyword search when semantic search finds no results', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0, 1])],
+      ['miss.md', source('miss.md', [0, 1])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: (notePath: string) => (notePath === 'match.md' ? 'alpha' : 'beta'),
+    };
+    const embedder = {
+      isAvailable: () => true,
+      embed: async () => [1, 0],
+    };
+    const engine = new SearchEngine(loader as never);
+    engine.setEmbedder(embedder as never);
+
+    const results = await engine.searchByQuery('alpha');
+
+    expect(results.map((result) => result.path)).toEqual(['match.md']);
+  });
 });
