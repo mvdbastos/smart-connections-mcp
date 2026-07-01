@@ -115,8 +115,12 @@ export class SmartConnectionsLoader {
    * Get a specific source by path
    */
   getSource(notePath: string): SmartSource | undefined {
-    const resolvedPath = this.resolveNotePath(notePath);
-    return this.sources.get(resolvedPath);
+    try {
+      const resolvedPath = this.resolveNotePath(notePath);
+      return this.sources.get(resolvedPath);
+    } catch {
+      return undefined;
+    }
   }
 
   /**

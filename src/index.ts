@@ -55,8 +55,11 @@ const searchEngine = new SearchEngine(loader);
 
 // Initialize local embedder for query search and write-time note embeddings.
 const embedder = new Embedder();
-await embedder.tryInit();
-searchEngine.setEmbedder(embedder);
+embedder.tryInit().then(() => {
+  searchEngine.setEmbedder(embedder);
+}).catch((err) => {
+  console.error('Embedder initialization failed; keyword search will be used as fallback:', err);
+});
 
 // Initialize git manager for the vault
 const gitManager = new GitManager(VAULT_ROOT);
@@ -615,6 +618,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               cwd: VAULT_ROOT,
               stdio: 'pipe',
               encoding: 'utf-8',
+              timeout: 10000,
+              env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
             });
             const files = statusOutput
               .split('\n')

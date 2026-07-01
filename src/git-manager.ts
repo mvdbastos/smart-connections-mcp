@@ -451,7 +451,7 @@ export class GitManager {
 
     try {
       const upstream = this.getUpstreamRef(branch);
-      return this.git(['log', `HEAD..${upstream}`, '--pretty=%h%x09%s%x09%ct'])
+      return this.git(['log', `HEAD..${upstream}`, `--max-count=${limit}`, '--pretty=%h%x09%s%x09%ct'])
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => line.length > 0)

@@ -34,9 +34,12 @@ export const EditNoteSchema = z
 
 export function formatToolError(toolName: string, error: unknown): string {
   if (error instanceof ZodError) {
+    if (error.issues.length === 0) {
+      return `${toolName}: validation failed`;
+    }
     const issue = error.issues[0];
-    const field = issue?.path.length ? issue.path.join('.') : 'arguments';
-    const expected = 'expected' in issue ? String(issue.expected) : issue?.message ?? 'valid value';
+    const field = issue.path.length ? issue.path.join('.') : 'arguments';
+    const expected = 'expected' in issue ? String(issue.expected) : issue.message ?? 'valid value';
     const received = 'received' in issue ? String(issue.received) : 'invalid value';
 
     return `${toolName}: invalid "${field}" (expected ${expected}, received ${received})`;
