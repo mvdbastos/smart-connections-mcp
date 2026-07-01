@@ -121,29 +121,35 @@ export class SearchEngine {
      * Search notes by content similarity
      */
     async searchByQuery(queryText, limit = 10, threshold = 0.5) {
+        const keywordResults = () => this.keywordSearch(queryText, limit, threshold);
         if (this.embedder?.isAvailable()) {
             try {
                 const embeddingVector = await this.embedder.embed(queryText);
                 const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
                 if (semanticResults.length > 0) {
-                    return semanticResults;
+                    return this.mergeResults(semanticResults, keywordResults(), limit);
                 }
             }
             catch {
                 // Fall back to keyword search if local embedding fails at query time.
             }
         }
+        return keywordResults();
+    }
+    keywordSearch(queryText, limit, threshold) {
         const results = [];
-        const queryLower = queryText.toLowerCase();
-        const escapedQuery = queryLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const queryTokens = this.tokenize(queryText);
+        if (queryTokens.length === 0) {
+            return results;
+        }
         for (const [path, source] of this.loader.getSources()) {
             try {
-                const content = this.loader.readNoteContent(path).toLowerCase();
-                // Simple relevance scoring based on keyword matches
-                const matches = (content.match(new RegExp(escapedQuery, 'gi')) || []).length;
+                const content = this.loader.readNoteContent(path);
+                const searchableText = `${path}\n${content}`;
+                const searchableTokens = new Set(this.tokenize(searchableText));
+                const matches = queryTokens.filter((token) => searchableTokens.has(token)).length;
                 if (matches > 0) {
-                    // Normalize score so one exact keyword hit is discoverable at the default threshold.
-                    const score = Math.min(matches / (matches + 1), 1.0);
+                    const score = matches / queryTokens.length;
                     if (score >= threshold) {
                         results.push({
                             path,
@@ -160,6 +166,21 @@ export class SearchEngine {
         }
         // Sort by similarity and limit
         return results
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, limit);
+    }
+    tokenize(text) {
+        return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+    }
+    mergeResults(primary, secondary, limit) {
+        const byPath = new Map();
+        for (const result of [...primary, ...secondary]) {
+            const existing = byPath.get(result.path);
+            if (!existing || result.similarity > existing.similarity) {
+                byPath.set(result.path, result);
+            }
+        }
+        return Array.from(byPath.values())
             .sort((a, b) => b.similarity - a.similarity)
             .slice(0, limit);
     }

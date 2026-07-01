@@ -26,6 +26,9 @@ export declare class SearchEngine {
      * Search notes by content similarity
      */
     searchByQuery(queryText: string, limit?: number, threshold?: number): Promise<SimilarNote[]>;
+    private keywordSearch;
+    private tokenize;
+    private mergeResults;
     /**
      * Get note content with matched blocks highlighted
      */

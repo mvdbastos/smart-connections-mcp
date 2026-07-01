@@ -97,4 +97,24 @@ describe('SearchEngine searchByQuery', () => {
 
     expect(results.map((result) => result.path)).toEqual(['match.md']);
   });
+
+  it('matches query tokens against note path and content instead of requiring one exact phrase', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['Docker Desktop WSL2 Logon Failure Fix.md', source('Docker Desktop WSL2 Logon Failure Fix.md', [0])],
+      ['Other.md', source('Other.md', [0])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: (notePath: string) =>
+        notePath === 'Docker Desktop WSL2 Logon Failure Fix.md'
+          ? '# Docker Desktop WSL2 Logon Failure - Troubleshooting & Fix\nbody'
+          : 'unrelated content',
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('Docker Desktop WSL2 Logon Failure Fix');
+
+    expect(results.map((result) => result.path)).toEqual(['Docker Desktop WSL2 Logon Failure Fix.md']);
+  });
 });
