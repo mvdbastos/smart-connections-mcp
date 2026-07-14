@@ -32,6 +32,55 @@ export const EditNoteSchema = z
     }
   });
 
+export const NoteWorkflowSchema = z
+  .object({
+    action: z.enum(['create', 'edit', 'delete']).describe('Workflow action'),
+    note_path: z.string().describe('Path to the note, relative to the vault'),
+    content: z.string().optional().describe('Markdown content; required for create and edit'),
+    frontmatter: z.record(z.unknown()).optional().describe('Optional frontmatter fields (create only)'),
+    mode: z
+      .enum(['overwrite', 'append', 'append-section', 'replace', 'insert-after-heading'])
+      .default('append')
+      .describe('Edit mode (edit action only)'),
+    heading: z.string().optional().describe('Heading for append-section or insert-after-heading mode'),
+    find: z.string().optional().describe('Text or regex pattern to find in replace mode'),
+    regex: z.boolean().optional().describe('Treat find as a regular expression in replace mode'),
+    count: z.number().int().positive().optional().describe('Maximum number of replacements'),
+    dry_run: z.boolean().optional().describe('Preview the edit diff without writing (edit action only)'),
+    defer_hint_seconds: z
+      .number()
+      .int()
+      .positive()
+      .max(1800)
+      .optional()
+      .describe('Hold auto-commit for at least this many seconds because more writes are coming'),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.action === 'create' || value.action === 'edit') && value.content === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['content'],
+        message: `${value.action} requires content`,
+      });
+    }
+
+    if (value.action === 'edit' && value.mode === 'replace' && !value.find) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['find'],
+        message: 'replace mode requires find',
+      });
+    }
+
+    if (value.action === 'edit' && value.mode === 'insert-after-heading' && !value.heading) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['heading'],
+        message: 'insert-after-heading mode requires heading',
+      });
+    }
+  });
+
 export function formatToolError(toolName: string, error: unknown): string {
   if (error instanceof ZodError) {
     if (error.issues.length === 0) {
