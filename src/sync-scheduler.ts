@@ -92,6 +92,43 @@ export class SyncScheduler {
     };
   }
 
+  /** A manual commit tool ran: pending changes are committed externally. */
+  notifyManualCommit(): void {
+    this.cancelCommitTimer();
+    this.dirtyPaths.clear();
+    this.commitRetried = false;
+    this.lastCommitError = undefined;
+    this.startPushTimer();
+  }
+
+  /** A manual push/sync tool ran: nothing left to push. */
+  notifyManualPush(): void {
+    this.cancelPushTimer();
+    this.pushState = 'pushed';
+  }
+
+  /** Best-effort synchronous flush for process shutdown. */
+  flushSync(): void {
+    this.cancelCommitTimer();
+    const hadDirty = this.dirtyPaths.size > 0;
+    if (hadDirty) {
+      this.fireCommit();
+    }
+
+    if (this.pushTimer) {
+      this.cancelPushTimer();
+      this.firePush();
+    }
+
+    if (!hadDirty) {
+      try {
+        this.onIdleFlush?.();
+      } catch {
+        // Usage-log flushing must never break shutdown.
+      }
+    }
+  }
+
   private scheduleCommit(delayMs: number): void {
     this.cancelCommitTimer();
     this.commitDeadline = Date.now() + delayMs;
