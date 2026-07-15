@@ -131,7 +131,72 @@ Notes:
 
 ## Available Tools
 
-### 1. `get_similar_notes`
+### 1. `note_workflow`
+
+Create, edit, or delete a note in a single call. Writes immediately, refreshes the note's local embedding, and marks it dirty for the auto-sync scheduler (see [Automatic commit/push](#automatic-commitpush) below) — no separate git tool call needed. This is the preferred tool for all note CRUD; `create_note`, `edit_note`, `delete_note`, and the `git_*` tools below are deprecated in its favor.
+
+**Parameters:**
+- `action` (string, required): `create`, `edit`, or `delete`
+- `note_path` (string, required): Path to the note, relative to vault root
+- `content` (string, required for `create`/`edit`): Markdown content to write, append, insert, or use as replacement text
+- `frontmatter` (object, optional): Frontmatter fields (`create` only)
+- `mode` (string, optional): `overwrite`, `append`, `append-section`, `replace`, or `insert-after-heading`; default `append` (`edit` only)
+- `heading` (string, optional): Heading for `append-section` or `insert-after-heading`
+- `find` (string, optional): Required for `replace` mode
+- `regex` (boolean, optional): Treat `find` as a regular expression
+- `count` (number, optional): Maximum number of replacements
+- `dry_run` (boolean, optional): Preview the diff without writing (`edit` only)
+- `defer_hint_seconds` (number, optional, max 1800): Hold auto-commit for at least this many seconds because more writes are coming
+
+**Search → preview → write recipe:**
+
+1. Search for the note, optionally with content inline so you don't need a follow-up read:
+
+```json
+{
+  "tool": "search_notes",
+  "arguments": {
+    "query": "project plan",
+    "include_content": true
+  }
+}
+```
+
+2. Preview the edit with `dry_run: true`:
+
+```json
+{
+  "tool": "note_workflow",
+  "arguments": {
+    "action": "edit",
+    "note_path": "Project Plan.md",
+    "mode": "replace",
+    "find": "old wording",
+    "content": "new wording",
+    "dry_run": true
+  }
+}
+```
+
+3. Write for real (omit `dry_run` or set it `false`). If several related edits are coming in this conversation, pass `defer_hint_seconds` so the scheduler doesn't commit between them:
+
+```json
+{
+  "tool": "note_workflow",
+  "arguments": {
+    "action": "edit",
+    "note_path": "Project Plan.md",
+    "mode": "replace",
+    "find": "old wording",
+    "content": "new wording",
+    "defer_hint_seconds": 120
+  }
+}
+```
+
+Every response includes a `sync` block (current scheduler state, seconds until commit/push, pending paths) and a `next_steps` hint — no manual `git_commit_notes` or `git_push_notes` call is needed.
+
+### 2. `get_similar_notes`
 
 Find notes semantically similar to a given note.
 
@@ -139,6 +204,8 @@ Find notes semantically similar to a given note.
 - `note_path` (string, required): Path to the note (e.g., "Note.md" or "Folder/Note.md")
 - `threshold` (number, optional): Similarity threshold 0-1, default 0.5
 - `limit` (number, optional): Maximum results, default 10
+- `include_content` (boolean, optional): Include note content inline in each result, default `false`. Skips a follow-up `get_note_content` call before editing.
+- `content_max_chars` (number, optional): Max content characters per note when `include_content` is true, default 2000
 
 **Example:**
 ```typescript
@@ -160,7 +227,7 @@ Find notes semantically similar to a given note.
 ]
 ```
 
-### 2. `get_connection_graph`
+### 3. `get_connection_graph`
 
 Build a multi-level connection graph showing how notes are semantically connected.
 
@@ -196,7 +263,7 @@ Build a multi-level connection graph showing how notes are semantically connecte
 }
 ```
 
-### 3. `search_notes`
+### 4. `search_notes`
 
 Search notes using a text query (keyword-based, ranked by relevance).
 
@@ -204,16 +271,19 @@ Search notes using a text query (keyword-based, ranked by relevance).
 - `query` (string, required): Search query text
 - `limit` (number, optional): Maximum results, default 10
 - `threshold` (number, optional): Relevance threshold 0-1, default 0.5
+- `include_content` (boolean, optional): Include note content inline in each result, default `false`. Skips a follow-up `get_note_content` call before editing.
+- `content_max_chars` (number, optional): Max content characters per note when `include_content` is true, default 2000
 
 **Example:**
 ```typescript
 {
   "query": "project management",
-  "limit": 5
+  "limit": 5,
+  "include_content": true
 }
 ```
 
-### 4. `get_embedding_neighbors`
+### 5. `get_embedding_neighbors`
 
 Find nearest neighbors for a given embedding vector (advanced use).
 
@@ -222,7 +292,7 @@ Find nearest neighbors for a given embedding vector (advanced use).
 - `k` (number, optional): Number of neighbors, default 10
 - `threshold` (number, optional): Similarity threshold 0-1, default 0.5
 
-### 5. `get_note_content`
+### 6. `get_note_content`
 
 Retrieve full note content with optional block extraction.
 
@@ -249,7 +319,9 @@ Retrieve full note content with optional block extraction.
 }
 ```
 
-### 6. `edit_note`
+### 7. `edit_note`
+
+> **Deprecated** — prefer [`note_workflow`](#1-note_workflow) (`action: "edit"`). Still fully functional; kept for backward compatibility.
 
 Edit a markdown note. Use `dry_run: true` to preview the unified diff and hashes without writing.
 
@@ -263,61 +335,9 @@ Edit a markdown note. Use `dry_run: true` to preview the unified diff and hashes
 - `count` (number, optional): Maximum number of replacements
 - `dry_run` (boolean, optional): Return diff and hashes without writing
 
-**Read → preview → write → commit recipe:**
+Calling `edit_note` still marks the note dirty for the auto-sync scheduler and does not require a manual `git_commit_notes` call. See [`note_workflow`](#1-note_workflow) for the recommended single-tool recipe.
 
-1. Read the current note content:
-
-```json
-{
-  "tool": "get_note_content",
-  "arguments": {
-    "note_path": "Project Plan"
-  }
-}
-```
-
-2. Preview the targeted edit:
-
-```json
-{
-  "tool": "edit_note",
-  "arguments": {
-    "note_path": "Project Plan",
-    "mode": "replace",
-    "find": "old wording",
-    "content": "new wording",
-    "dry_run": true
-  }
-}
-```
-
-3. Review the returned `diff`, then write the same edit with `dry_run: false` or omitted:
-
-```json
-{
-  "tool": "edit_note",
-  "arguments": {
-    "note_path": "Project Plan",
-    "mode": "replace",
-    "find": "old wording",
-    "content": "new wording"
-  }
-}
-```
-
-4. Commit only the changed note:
-
-```json
-{
-  "tool": "git_commit_notes_specific",
-  "arguments": {
-    "note_paths": ["Project Plan.md"],
-    "message": "Update project plan wording"
-  }
-}
-```
-
-### 7. `get_stats`
+### 8. `get_stats`
 
 Get statistics about the knowledge base.
 
@@ -329,9 +349,39 @@ Get statistics about the knowledge base.
   "totalNotes": 137,
   "totalBlocks": 1842,
   "embeddingDimension": 384,
-  "modelKey": "TaylorAI/bge-micro-v2"
+  "modelKey": "TaylorAI/bge-micro-v2",
+  "git": { "...": "..." },
+  "sync": {
+    "state": "idle",
+    "pendingPaths": [],
+    "commitInSeconds": null,
+    "pushInSeconds": null
+  }
 }
 ```
+
+### Deprecated tools
+
+The following tools remain fully functional but are superseded by [`note_workflow`](#1-note_workflow). Each still marks writes dirty for the auto-sync scheduler (or notifies it directly for the git tools), so no functionality is lost by continuing to use them — they're just more round trips than `note_workflow`.
+
+- **`create_note`** — `note_path` (string, required), `content` (string, required), `frontmatter` (object, optional). Prefer `note_workflow` with `action: "create"`.
+- **`delete_note`** — `note_path` (string, required). Prefer `note_workflow` with `action: "delete"`.
+- **`git_commit_notes`** — `message`, `author_name`, `author_email` (all optional). Commits all uncommitted changes immediately. `note_workflow` and `edit_note`/`create_note`/`delete_note` no longer require a manual commit call — the scheduler handles it after an idle window.
+- **`git_commit_notes_specific`** — `note_paths` (string[], required), `message`, `author_name`, `author_email` (optional). Commits specific files immediately.
+- **`git_push_notes`** — no parameters. Pushes immediately and notifies the scheduler that nothing is left to push.
+- **`git_sync_notes`** — no parameters. Fetches, pulls, then pushes; reports merge conflicts.
+
+## Automatic commit/push
+
+Every write — from `note_workflow` or any of the deprecated write tools — marks the changed note "dirty" in a shared `SyncScheduler`:
+
+1. **Commit timer** (default 30s idle, `SYNC_COMMIT_IDLE_MS`): resets on every new dirty write. When it fires, all dirty paths are committed with an auto-generated message.
+2. **Push timer** (default 2min after a successful commit, `SYNC_PUSH_IDLE_MS`): starts once the commit lands, and pushes when it fires.
+3. **`defer_hint_seconds`** (on `note_workflow`, capped at 1800s/30min): extends the commit window when you know more related writes are coming in the same conversation, so the scheduler doesn't commit mid-sequence.
+4. **Manual git tools** (`git_commit_notes`, `git_commit_notes_specific`, `git_push_notes`, `git_sync_notes`) still work and immediately notify the scheduler so it doesn't double-commit or double-push.
+5. **Shutdown**: on `SIGINT`/`SIGTERM`/stdin close, any pending commit and push are flushed synchronously before the process exits.
+
+Every `note_workflow` response includes a `sync` block reporting the scheduler's current state (`idle`, `commit_scheduled`, `commit_deferred`, or `push_pending`), seconds until the next action, and pending paths — no need to call `get_stats` just to check sync status.
 
 ## Usage Examples
 
@@ -424,6 +474,22 @@ npm run watch
 export SMART_VAULT_PATH="/path/to/your/vault"
 npm run dev
 ```
+
+### Usage logging
+
+To evaluate whether the deprecated tools (`create_note`, `edit_note`, `delete_note`, and the `git_*` tools) are still needed, the server can optionally log every call to them:
+
+```bash
+node dist/index.js --log-usage
+```
+
+This writes JSONL entries to `logs/mcp-tool-usage.log` next to the compiled package (outside the vault, so it's never picked up by the auto-commit scheduler). Pass a custom path with `--log-usage=<path>`. Each entry looks like:
+
+```json
+{"timestamp":"2026-07-14T12:00:00.000Z","tool":"edit_note","args":{"note_path":"Note.md","mode":"append"}}
+```
+
+Note content is never logged — only a small, fixed set of non-sensitive argument keys (`note_path`, `note_paths`, `mode`, `message`). Entries are queued in memory (no disk I/O on the tool-call hot path) and flushed to disk during the sync scheduler's idle windows, or on shutdown.
 
 ### Project Structure
 ```

@@ -1,5 +1,17 @@
 # Changelog
 
+## workflow-sync
+
+### Added
+- `note_workflow` tool: create/edit/delete a note in a single call with embedding refresh and deferred auto-commit/push.
+- `SyncScheduler`: idle-debounced auto-commit (30s, `SYNC_COMMIT_IDLE_MS`) and auto-push (2min, `SYNC_PUSH_IDLE_MS`) fed by every write tool; `defer_hint_seconds` extends the window (capped at 30min); manual git tools flush immediately; best-effort flush on shutdown.
+- Opt-in deprecated-tool usage logging via `--log-usage[=<path>]`, queued in memory and flushed during idle windows to `logs/mcp-tool-usage.log` outside the vault.
+- `include_content`/`content_max_chars` on `search_notes` and `get_similar_notes`.
+- `sync` status block in `get_stats`.
+
+### Changed
+- Deprecated (still functional): `create_note`, `edit_note`, `delete_note`, `git_commit_notes`, `git_commit_notes_specific`, `git_push_notes`, `git_sync_notes`.
+
 ## git-integration
 
 ### Added
