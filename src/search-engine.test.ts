@@ -118,3 +118,84 @@ describe('SearchEngine searchByQuery', () => {
     expect(results.map((result) => result.path)).toEqual(['Docker Desktop WSL2 Logon Failure Fix.md']);
   });
 });
+
+describe('SearchEngine include_content', () => {
+  it('attaches note content when includeContent is true', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: () => 'alpha body text',
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('alpha', 10, 0.1, { includeContent: true });
+
+    expect(results[0].content).toBe('alpha body text');
+    expect(results[0].truncated).toBe(false);
+  });
+
+  it('truncates content at contentMaxChars and flags it', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: () => `alpha ${'x'.repeat(5000)}`,
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('alpha', 10, 0.1, {
+      includeContent: true,
+      contentMaxChars: 100,
+    });
+
+    expect(results[0].content).toHaveLength(100);
+    expect(results[0].truncated).toBe(true);
+  });
+
+  it('omits content by default', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0])],
+    ]);
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: () => 'alpha',
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('alpha', 10, 0.1);
+
+    expect(results[0].content).toBeUndefined();
+  });
+
+  it('skips content for notes that cannot be read', async () => {
+    const sources = new Map<string, SmartSource>([
+      ['match.md', source('match.md', [0])],
+    ]);
+    // Keyword scoring reads each note once (call 1); content attachment
+    // reads again (call 2) — make only the second read fail.
+    let calls = 0;
+    const loader = {
+      getEmbeddingModelKey: () => 'model',
+      getSources: () => sources,
+      readNoteContent: () => {
+        calls += 1;
+        if (calls > 1) {
+          throw new Error('unreadable');
+        }
+        return 'alpha';
+      },
+    };
+    const engine = new SearchEngine(loader as never);
+
+    const results = await engine.searchByQuery('alpha', 10, 0.1, { includeContent: true });
+
+    expect(results[0].path).toBe('match.md');
+    expect(results[0].content).toBeUndefined();
+  });
+});

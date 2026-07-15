@@ -7,6 +7,11 @@ import { cosineSimilarity, findNearestNeighbors } from './embedding-utils.js';
 import type { SmartConnectionsLoader } from './smart-connections-loader.js';
 import type { Embedder } from './embedder.js';
 
+export interface SearchContentOptions {
+  includeContent?: boolean;
+  contentMaxChars?: number;
+}
+
 export class SearchEngine {
   private loader: SmartConnectionsLoader;
   private embeddingModelKey: string;
@@ -27,7 +32,8 @@ export class SearchEngine {
   getSimilarNotes(
     notePath: string,
     threshold: number = 0.5,
-    limit: number = 10
+    limit: number = 10,
+    contentOptions?: SearchContentOptions
   ): SimilarNote[] {
     const source = this.loader.getSource(notePath);
 
@@ -66,11 +72,13 @@ export class SearchEngine {
     );
 
     // Convert to SimilarNote format
-    return neighbors.map(neighbor => ({
+    const results = neighbors.map(neighbor => ({
       path: neighbor.id,
       similarity: neighbor.similarity,
       blocks: neighbor.metadata.blocks
     }));
+
+    return this.attachContent(results, contentOptions);
   }
 
   /**
@@ -183,7 +191,8 @@ export class SearchEngine {
   async searchByQuery(
     queryText: string,
     limit: number = 10,
-    threshold: number = 0.5
+    threshold: number = 0.5,
+    contentOptions?: SearchContentOptions
   ): Promise<SimilarNote[]> {
     const keywordResults = (): SimilarNote[] => this.keywordSearch(queryText, limit, threshold);
 
@@ -192,14 +201,36 @@ export class SearchEngine {
         const embeddingVector = await this.embedder.embed(queryText);
         const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
         if (semanticResults.length > 0) {
-          return this.mergeResults(semanticResults, keywordResults(), limit);
+          return this.attachContent(this.mergeResults(semanticResults, keywordResults(), limit), contentOptions);
         }
       } catch {
         // Fall back to keyword search if local embedding fails at query time.
       }
     }
 
-    return keywordResults();
+    return this.attachContent(keywordResults(), contentOptions);
+  }
+
+  private attachContent(results: SimilarNote[], options?: SearchContentOptions): SimilarNote[] {
+    if (!options?.includeContent) {
+      return results;
+    }
+
+    const maxChars = options.contentMaxChars ?? 2000;
+
+    return results.map((result) => {
+      try {
+        const full = this.loader.readNoteContent(result.path);
+        const truncated = full.length > maxChars;
+        return {
+          ...result,
+          content: truncated ? full.slice(0, maxChars) : full,
+          truncated,
+        };
+      } catch {
+        return result;
+      }
+    });
   }
 
   private keywordSearch(queryText: string, limit: number, threshold: number): SimilarNote[] {
