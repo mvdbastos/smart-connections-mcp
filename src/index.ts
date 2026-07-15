@@ -7,6 +7,7 @@
  * via the Model Context Protocol (MCP).
  */
 
+import { fileURLToPath } from 'url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -29,6 +30,7 @@ import { GitManager } from './git-manager.js';
 import { Embedder } from './embedder.js';
 import { appendSourceVector } from './ajson-writer.js';
 import { createNote, deleteNote, editNote } from './note-writer.js';
+import { UsageLog } from './tool-usage-log.js';
 import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
 import { SyncScheduler } from './sync-scheduler.js';
 import type { SyncStatus } from './sync-scheduler.js';
@@ -66,6 +68,25 @@ embedder.tryInit().then(() => {
 // Initialize git manager for the vault
 const gitManager = new GitManager(VAULT_ROOT);
 
+function parseUsageLogPath(argv: string[]): string | null {
+  for (const arg of argv) {
+    if (arg === '--log-usage') {
+      return path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'logs', 'mcp-tool-usage.log');
+    }
+    if (arg.startsWith('--log-usage=')) {
+      return arg.slice('--log-usage='.length);
+    }
+  }
+  return null;
+}
+
+const usageLogPath = parseUsageLogPath(process.argv.slice(2));
+const usageLog = usageLogPath ? new UsageLog(usageLogPath) : null;
+
+if (usageLog) {
+  console.error(`Deprecated-tool usage logging enabled: ${usageLogPath}`);
+}
+
 const COMMIT_IDLE_MS = parseInt(process.env.SYNC_COMMIT_IDLE_MS ?? '30000', 10);
 const PUSH_IDLE_MS = parseInt(process.env.SYNC_PUSH_IDLE_MS ?? '120000', 10);
 
@@ -78,6 +99,9 @@ const syncScheduler = new SyncScheduler(
   {
     commitIdleMs: COMMIT_IDLE_MS,
     pushIdleMs: PUSH_IDLE_MS,
+    onIdleFlush: () => {
+      void usageLog?.flush();
+    },
   }
 );
 
@@ -122,6 +146,8 @@ const GetSimilarNotesSchema = z.object({
   note_path: z.string().describe('Path to the note (e.g., "Note.md" or "Folder/Note.md")'),
   threshold: z.number().min(0).max(1).default(0.5).describe('Similarity threshold (0-1)'),
   limit: z.number().int().positive().default(10).describe('Maximum number of results'),
+  include_content: z.boolean().default(false).describe('Include note content inline in each result'),
+  content_max_chars: z.number().int().positive().default(2000).describe('Max content characters per note'),
 });
 
 const GetConnectionGraphSchema = z.object({
@@ -135,6 +161,8 @@ const SearchNotesSchema = z.object({
   query: z.string().describe('Search query text'),
   limit: z.number().int().positive().default(10).describe('Maximum number of results'),
   threshold: z.number().min(0).max(1).default(0.5).describe('Similarity threshold (0-1)'),
+  include_content: z.boolean().default(false).describe('Include note content inline in each result'),
+  content_max_chars: z.number().int().positive().default(2000).describe('Max content characters per note'),
 });
 
 const GetEmbeddingNeighborsSchema = z.object({
@@ -256,6 +284,17 @@ const tools: Tool[] = [
           minimum: 1,
           default: 10,
         },
+        include_content: {
+          type: 'boolean',
+          description: 'Include note content inline in each result (default false). Skips the need for a follow-up get_note_content call before editing.',
+          default: false,
+        },
+        content_max_chars: {
+          type: 'number',
+          description: 'Max content characters per note when include_content is true, default 2000',
+          minimum: 1,
+          default: 2000,
+        },
       },
       required: ['note_path'],
     },
@@ -315,6 +354,17 @@ const tools: Tool[] = [
           minimum: 0,
           maximum: 1,
           default: 0.5,
+        },
+        include_content: {
+          type: 'boolean',
+          description: 'Include note content inline in each result (default false). Skips the need for a follow-up get_note_content call before editing.',
+          default: false,
+        },
+        content_max_chars: {
+          type: 'number',
+          description: 'Max content characters per note when include_content is true, default 2000',
+          minimum: 1,
+          default: 2000,
         },
       },
       required: ['query'],
@@ -377,7 +427,7 @@ const tools: Tool[] = [
   },
   {
     name: 'create_note',
-    description: 'Create a new markdown note in the vault and update its local embedding when available.',
+    description: '[DEPRECATED — prefer note_workflow] Create a new markdown note in the vault and update its local embedding when available.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -390,7 +440,7 @@ const tools: Tool[] = [
   },
   {
     name: 'edit_note',
-    description: 'Edit a markdown note using overwrite, append, append-section, replace, or insert-after-heading mode. Supports dry_run previews with a unified diff before writing.',
+    description: '[DEPRECATED — prefer note_workflow] Edit a markdown note using overwrite, append, append-section, replace, or insert-after-heading mode. Supports dry_run previews with a unified diff before writing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -413,7 +463,7 @@ const tools: Tool[] = [
   },
   {
     name: 'delete_note',
-    description: 'Delete a markdown note from the vault.',
+    description: '[DEPRECATED — prefer note_workflow] Delete a markdown note from the vault.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -424,7 +474,7 @@ const tools: Tool[] = [
   },
   {
     name: 'git_commit_notes',
-    description: 'Commit all uncommitted changes to git with an auto-generated or custom message.',
+    description: '[DEPRECATED — prefer note_workflow] Commit all uncommitted changes to git with an auto-generated or custom message.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -445,7 +495,7 @@ const tools: Tool[] = [
   },
   {
     name: 'git_commit_notes_specific',
-    description: 'Commit specific note files to git.',
+    description: '[DEPRECATED — prefer note_workflow] Commit specific note files to git.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -472,7 +522,7 @@ const tools: Tool[] = [
   },
   {
     name: 'git_push_notes',
-    description: 'Push committed note changes to the configured git remote, with a local fallback when remote push is unavailable.',
+    description: '[DEPRECATED — prefer note_workflow] Push committed note changes to the configured git remote, with a local fallback when remote push is unavailable.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -480,7 +530,7 @@ const tools: Tool[] = [
   },
   {
     name: 'git_sync_notes',
-    description: 'Sync notes by fetching, pulling, then pushing changes. Detects and reports merge conflicts.',
+    description: '[DEPRECATED — prefer note_workflow] Sync notes by fetching, pulling, then pushing changes. Detects and reports merge conflicts.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -554,9 +604,39 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
   };
 });
 
+const DEPRECATED_TOOLS = new Set([
+  'create_note',
+  'edit_note',
+  'delete_note',
+  'git_commit_notes',
+  'git_commit_notes_specific',
+  'git_push_notes',
+  'git_sync_notes',
+]);
+
+function summarizeArgs(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== 'object') {
+    return {};
+  }
+
+  const source = args as Record<string, unknown>;
+  const summary: Record<string, unknown> = {};
+  for (const key of ['note_path', 'note_paths', 'mode', 'message']) {
+    if (key in source) {
+      summary[key] = source[key];
+    }
+  }
+
+  return summary;
+}
+
 // Handle tool execution requests
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  if (usageLog && DEPRECATED_TOOLS.has(name)) {
+    usageLog.record(name, summarizeArgs(args));
+  }
 
   try {
     switch (name) {
@@ -621,8 +701,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'get_similar_notes': {
-        const { note_path, threshold, limit } = GetSimilarNotesSchema.parse(args);
-        const results = searchEngine.getSimilarNotes(note_path, threshold, limit);
+        const { note_path, threshold, limit, include_content, content_max_chars } = GetSimilarNotesSchema.parse(args);
+        const results = searchEngine.getSimilarNotes(note_path, threshold, limit, {
+          includeContent: include_content,
+          contentMaxChars: content_max_chars,
+        });
         return {
           content: [
             {
@@ -647,8 +730,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'search_notes': {
-        const { query, limit, threshold } = SearchNotesSchema.parse(args);
-        const results = await searchEngine.searchByQuery(query, limit, threshold);
+        const { query, limit, threshold, include_content, content_max_chars } = SearchNotesSchema.parse(args);
+        const results = await searchEngine.searchByQuery(query, limit, threshold, {
+          includeContent: include_content,
+          contentMaxChars: content_max_chars,
+        });
         return {
           content: [
             {
@@ -855,6 +941,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const combinedStats = {
           ...stats,
           git: gitStatus,
+          sync: syncScheduler.getStatus(),
         };
 
         return {
@@ -882,6 +969,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true,
     };
   }
+});
+
+// Flush pending commits/pushes and queued usage-log entries on shutdown.
+let shutdownRan = false;
+function shutdown(): void {
+  if (shutdownRan) {
+    return;
+  }
+  shutdownRan = true;
+
+  try {
+    syncScheduler.flushSync();
+  } catch (error) {
+    console.error('Sync flush on shutdown failed:', error);
+  }
+
+  try {
+    usageLog?.flushSync();
+  } catch (error) {
+    console.error('Usage log flush on shutdown failed:', error);
+  }
+}
+
+process.on('SIGINT', () => {
+  shutdown();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  shutdown();
+  process.exit(0);
+});
+process.stdin.on('close', () => {
+  shutdown();
 });
 
 // Start the server
