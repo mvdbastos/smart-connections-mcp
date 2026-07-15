@@ -43,6 +43,12 @@ You should see `index.js` and other compiled files.
 
    **Note**: A sample configuration has been saved to `claude_desktop_config.json` in this directory.
 
+   Codex CLI command to add the MCP server:
+
+   ```bash
+   codex mcp add obsidian-smart-connections --env SMART_VAULT_PATH=C:\\obsidian\\mb-kb -- node C:\\obsidian\\smart-connections-mcp\\dist\\index.js
+   ```
+
 ## Step 3: Restart Claude Desktop
 
 1. Quit Claude Desktop completely (Cmd+Q)

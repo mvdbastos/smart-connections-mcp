@@ -11,7 +11,9 @@
     "build": "tsc",
     "watch": "tsc --watch",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "dev": "tsc && node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
   },
   "keywords": [
     "mcp",
@@ -23,11 +25,14 @@
   "author": "Daniel Glickman",
   "license": "MIT",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "typescript": "^5.7.2"
+    "@vitest/ui": "^2.1.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.2"
   }
 }

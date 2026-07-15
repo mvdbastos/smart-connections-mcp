@@ -57,6 +57,8 @@ export interface SimilarNote {
     similarity: number;
     blocks?: string[];
     matchedContent?: string;
+    content?: string;
+    truncated?: boolean;
 }
 export interface ConnectionNode {
     root: string;
@@ -77,5 +79,55 @@ export interface NoteContent {
     path: string;
     content: string;
     blocks: string[];
+}
+/**
+ * Result of a git commit operation
+ */
+export interface GitCommitResult {
+    success: boolean;
+    commitHash?: string;
+    filesChanged: string[];
+    message: string;
+    error?: string;
+}
+/**
+ * Result of a git push operation
+ */
+export interface GitPushResult {
+    success: boolean;
+    branch: string;
+    localFallback: boolean;
+    message?: string;
+    error?: string;
+}
+/**
+ * Result of a git sync (fetch + pull) operation
+ */
+export interface GitSyncResult {
+    success: boolean;
+    branch: string;
+    commitsBehind: number;
+    commits: Array<{
+        hash: string;
+        message: string;
+        timestamp: number;
+    }>;
+    conflicts?: string[];
+    push?: GitPushResult;
+    error?: string;
+}
+/**
+ * Current git status of the vault
+ */
+export interface GitStatus {
+    branch: string;
+    commitHash: string;
+    aheadRemote: number;
+    behindRemote: number;
+    uncommittedChanges: number;
+    lastCommitTime: number;
+    lastCommitMessage: string;
+    gitAvailable: boolean;
+    isRepository: boolean;
 }
 //# sourceMappingURL=types.d.ts.map

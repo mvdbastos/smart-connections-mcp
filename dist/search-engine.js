@@ -5,14 +5,18 @@ import { findNearestNeighbors } from './embedding-utils.js';
 export class SearchEngine {
     loader;
     embeddingModelKey;
+    embedder = null;
     constructor(loader) {
         this.loader = loader;
         this.embeddingModelKey = loader.getEmbeddingModelKey();
     }
+    setEmbedder(embedder) {
+        this.embedder = embedder;
+    }
     /**
      * Find similar notes to a given note path
      */
-    getSimilarNotes(notePath, threshold = 0.5, limit = 10) {
+    getSimilarNotes(notePath, threshold = 0.5, limit = 10, contentOptions) {
         const source = this.loader.getSource(notePath);
         if (!source) {
             throw new Error(`Note not found: ${notePath}`);
@@ -23,7 +27,7 @@ export class SearchEngine {
         }
         // Build vector dataset from all sources
         const vectors = Array.from(this.loader.getSources().entries())
-            .filter(([path]) => path !== notePath) // Exclude the query note itself
+            .filter(([path]) => path !== source.path) // Exclude the query note itself
             .map(([path, src]) => {
             const emb = src.embeddings[this.embeddingModelKey];
             return {
@@ -39,11 +43,12 @@ export class SearchEngine {
         // Find nearest neighbors
         const neighbors = findNearestNeighbors(embeddings.vec, vectors, limit, threshold);
         // Convert to SimilarNote format
-        return neighbors.map(neighbor => ({
+        const results = neighbors.map(neighbor => ({
             path: neighbor.id,
             similarity: neighbor.similarity,
             blocks: neighbor.metadata.blocks
         }));
+        return this.attachContent(results, contentOptions);
     }
     /**
      * Get embedding neighbors for a given embedding vector
@@ -116,20 +121,56 @@ export class SearchEngine {
     /**
      * Search notes by content similarity
      */
-    searchByQuery(queryText, limit = 10, threshold = 0.5) {
-        // For now, we'll do a simple keyword match since we don't have
-        // a way to generate embeddings for arbitrary text without the model.
-        // In a full implementation, you'd call the embedding model here.
+    async searchByQuery(queryText, limit = 10, threshold = 0.5, contentOptions) {
+        const keywordResults = () => this.keywordSearch(queryText, limit, threshold);
+        if (this.embedder?.isAvailable()) {
+            try {
+                const embeddingVector = await this.embedder.embed(queryText);
+                const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+                if (semanticResults.length > 0) {
+                    return this.attachContent(this.mergeResults(semanticResults, keywordResults(), limit), contentOptions);
+                }
+            }
+            catch {
+                // Fall back to keyword search if local embedding fails at query time.
+            }
+        }
+        return this.attachContent(keywordResults(), contentOptions);
+    }
+    attachContent(results, options) {
+        if (!options?.includeContent) {
+            return results;
+        }
+        const maxChars = options.contentMaxChars ?? 2000;
+        return results.map((result) => {
+            try {
+                const full = this.loader.readNoteContent(result.path);
+                const truncated = full.length > maxChars;
+                return {
+                    ...result,
+                    content: truncated ? full.slice(0, maxChars) : full,
+                    truncated,
+                };
+            }
+            catch {
+                return result;
+            }
+        });
+    }
+    keywordSearch(queryText, limit, threshold) {
         const results = [];
-        const queryLower = queryText.toLowerCase();
+        const queryTokens = this.tokenize(queryText);
+        if (queryTokens.length === 0) {
+            return results;
+        }
         for (const [path, source] of this.loader.getSources()) {
             try {
-                const content = this.loader.readNoteContent(path).toLowerCase();
-                // Simple relevance scoring based on keyword matches
-                const matches = (content.match(new RegExp(queryLower, 'gi')) || []).length;
+                const content = this.loader.readNoteContent(path);
+                const searchableText = `${path}\n${content}`;
+                const searchableTokens = new Set(this.tokenize(searchableText));
+                const matches = queryTokens.filter((token) => searchableTokens.has(token)).length;
                 if (matches > 0) {
-                    // Normalize score (this is a crude approximation)
-                    const score = Math.min(matches / 10, 1.0);
+                    const score = matches / queryTokens.length;
                     if (score >= threshold) {
                         results.push({
                             path,
@@ -149,6 +190,21 @@ export class SearchEngine {
             .sort((a, b) => b.similarity - a.similarity)
             .slice(0, limit);
     }
+    tokenize(text) {
+        return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+    }
+    mergeResults(primary, secondary, limit) {
+        const byPath = new Map();
+        for (const result of [...primary, ...secondary]) {
+            const existing = byPath.get(result.path);
+            if (!existing || result.similarity > existing.similarity) {
+                byPath.set(result.path, result);
+            }
+        }
+        return Array.from(byPath.values())
+            .sort((a, b) => b.similarity - a.similarity)
+            .slice(0, limit);
+    }
     /**
      * Get note content with matched blocks highlighted
      */
@@ -157,7 +213,7 @@ export class SearchEngine {
         const source = this.loader.getSource(notePath);
         const availableBlocks = source ? Object.keys(source.blocks || {}) : [];
         return {
-            path: notePath,
+            path: source?.path ?? notePath,
             content,
             blocks: availableBlocks
         };

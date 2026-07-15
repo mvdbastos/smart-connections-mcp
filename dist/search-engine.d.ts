@@ -3,14 +3,21 @@
  */
 import type { SimilarNote, ConnectionGraph, NoteContent } from './types.js';
 import type { SmartConnectionsLoader } from './smart-connections-loader.js';
+import type { Embedder } from './embedder.js';
+export interface SearchContentOptions {
+    includeContent?: boolean;
+    contentMaxChars?: number;
+}
 export declare class SearchEngine {
     private loader;
     private embeddingModelKey;
+    private embedder;
     constructor(loader: SmartConnectionsLoader);
+    setEmbedder(embedder: Pick<Embedder, 'embed' | 'isAvailable'>): void;
     /**
      * Find similar notes to a given note path
      */
-    getSimilarNotes(notePath: string, threshold?: number, limit?: number): SimilarNote[];
+    getSimilarNotes(notePath: string, threshold?: number, limit?: number, contentOptions?: SearchContentOptions): SimilarNote[];
     /**
      * Get embedding neighbors for a given embedding vector
      */
@@ -22,7 +29,11 @@ export declare class SearchEngine {
     /**
      * Search notes by content similarity
      */
-    searchByQuery(queryText: string, limit?: number, threshold?: number): SimilarNote[];
+    searchByQuery(queryText: string, limit?: number, threshold?: number, contentOptions?: SearchContentOptions): Promise<SimilarNote[]>;
+    private attachContent;
+    private keywordSearch;
+    private tokenize;
+    private mergeResults;
     /**
      * Get note content with matched blocks highlighted
      */

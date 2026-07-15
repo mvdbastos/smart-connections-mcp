@@ -1,0 +1,1 @@
+{"version":3,"file":"embedder.d.ts","sourceRoot":"","sources":["../src/embedder.ts"],"names":[],"mappings":"AAAA,qBAAa,QAAQ;IACnB,OAAO,CAAC,IAAI,CAAiI;IAC7I,OAAO,CAAC,SAAS,CAAS;IAEpB,OAAO,IAAI,OAAO,CAAC,OAAO,CAAC;IAiBjC,WAAW,IAAI,OAAO;IAIhB,KAAK,CAAC,IAAI,EAAE,MAAM,GAAG,OAAO,CAAC,MAAM,EAAE,CAAC;CAQ7C"}

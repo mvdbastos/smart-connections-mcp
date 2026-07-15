@@ -115,7 +115,101 @@ export class SmartConnectionsLoader {
    * Get a specific source by path
    */
   getSource(notePath: string): SmartSource | undefined {
-    return this.sources.get(notePath);
+    try {
+      const resolvedPath = this.resolveNotePath(notePath);
+      return this.sources.get(resolvedPath);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Resolve a caller-provided note path to the canonical indexed source path.
+   */
+  resolveNotePath(notePath: string): string {
+    if (this.sources.has(notePath)) {
+      return notePath;
+    }
+
+    if (!notePath.toLowerCase().endsWith('.md')) {
+      const withExtension = `${notePath}.md`;
+      if (this.sources.has(withExtension)) {
+        return withExtension;
+      }
+    }
+
+    const requestedLower = notePath.toLowerCase();
+    for (const sourcePath of Array.from(this.sources.keys())) {
+      if (sourcePath.toLowerCase() === requestedLower) {
+        return sourcePath;
+      }
+    }
+
+    const requestedBasename = path.basename(notePath, path.extname(notePath)).toLowerCase();
+    const basenameMatches = Array.from(this.sources.keys()).filter((sourcePath) => {
+      return path.basename(sourcePath, path.extname(sourcePath)).toLowerCase() === requestedBasename;
+    });
+
+    if (basenameMatches.length === 1) {
+      return basenameMatches[0];
+    }
+
+    if (basenameMatches.length > 1) {
+      throw new Error(`Ambiguous note "${notePath}". Candidates: ${basenameMatches.slice(0, 10).join(', ')}`);
+    }
+
+    const suggestions = this.closestSourcePaths(notePath, 3);
+    const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
+    throw new Error(`Note not found: "${notePath}".${suggestionText}`);
+  }
+
+  private closestSourcePaths(notePath: string, limit: number): string[] {
+    const normalizedInput = notePath.toLowerCase();
+
+    return Array.from(this.sources.keys())
+      .map((sourcePath) => ({
+        sourcePath,
+        distance: this.levenshtein(normalizedInput, sourcePath.toLowerCase()),
+      }))
+      .sort((a, b) => a.distance - b.distance || a.sourcePath.localeCompare(b.sourcePath))
+      .slice(0, limit)
+      .map(({ sourcePath }) => sourcePath);
+  }
+
+  private levenshtein(left: string, right: string): number {
+    const rows = left.length + 1;
+    const columns = right.length + 1;
+    const distances = Array.from({ length: rows }, () => new Array<number>(columns).fill(0));
+
+    for (let row = 0; row < rows; row += 1) {
+      distances[row][0] = row;
+    }
+
+    for (let column = 0; column < columns; column += 1) {
+      distances[0][column] = column;
+    }
+
+    for (let row = 1; row < rows; row += 1) {
+      for (let column = 1; column < columns; column += 1) {
+        const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+        distances[row][column] = Math.min(
+          distances[row - 1][column] + 1,
+          distances[row][column - 1] + 1,
+          distances[row - 1][column - 1] + cost
+        );
+      }
+    }
+
+    return distances[left.length][right.length];
+  }
+
+  /**
+   * Add or replace a source in the in-memory source map.
+   */
+  upsertSource(source: SmartSource): void {
+    if (source && source.path) {
+      this.sources.set(source.path, source);
+    }
   }
 
   /**
@@ -167,7 +261,20 @@ export class SmartConnectionsLoader {
    * Read the actual markdown content of a note
    */
   readNoteContent(notePath: string): string {
-    const fullPath = path.join(this.vaultPath, notePath);
+    let resolvedPath = notePath;
+
+    try {
+      resolvedPath = this.resolveNotePath(notePath);
+    } catch (error) {
+      const exactPath = path.join(this.vaultPath, notePath);
+      if (fs.existsSync(exactPath)) {
+        return fs.readFileSync(exactPath, 'utf-8');
+      }
+
+      throw error;
+    }
+
+    const fullPath = path.join(this.vaultPath, resolvedPath);
 
     if (!fs.existsSync(fullPath)) {
       throw new Error(`Note not found at: ${fullPath}`);

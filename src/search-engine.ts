@@ -5,14 +5,25 @@
 import type { SmartSource, SimilarNote, ConnectionNode, ConnectionGraph, NoteContent } from './types.js';
 import { cosineSimilarity, findNearestNeighbors } from './embedding-utils.js';
 import type { SmartConnectionsLoader } from './smart-connections-loader.js';
+import type { Embedder } from './embedder.js';
+
+export interface SearchContentOptions {
+  includeContent?: boolean;
+  contentMaxChars?: number;
+}
 
 export class SearchEngine {
   private loader: SmartConnectionsLoader;
   private embeddingModelKey: string;
+  private embedder: Pick<Embedder, 'embed' | 'isAvailable'> | null = null;
 
   constructor(loader: SmartConnectionsLoader) {
     this.loader = loader;
     this.embeddingModelKey = loader.getEmbeddingModelKey();
+  }
+
+  setEmbedder(embedder: Pick<Embedder, 'embed' | 'isAvailable'>): void {
+    this.embedder = embedder;
   }
 
   /**
@@ -21,7 +32,8 @@ export class SearchEngine {
   getSimilarNotes(
     notePath: string,
     threshold: number = 0.5,
-    limit: number = 10
+    limit: number = 10,
+    contentOptions?: SearchContentOptions
   ): SimilarNote[] {
     const source = this.loader.getSource(notePath);
 
@@ -37,7 +49,7 @@ export class SearchEngine {
 
     // Build vector dataset from all sources
     const vectors = Array.from(this.loader.getSources().entries())
-      .filter(([path]) => path !== notePath) // Exclude the query note itself
+      .filter(([path]) => path !== source.path) // Exclude the query note itself
       .map(([path, src]) => {
         const emb = src.embeddings[this.embeddingModelKey];
         return {
@@ -60,11 +72,13 @@ export class SearchEngine {
     );
 
     // Convert to SimilarNote format
-    return neighbors.map(neighbor => ({
+    const results = neighbors.map(neighbor => ({
       path: neighbor.id,
       similarity: neighbor.similarity,
       blocks: neighbor.metadata.blocks
     }));
+
+    return this.attachContent(results, contentOptions);
   }
 
   /**
@@ -174,28 +188,68 @@ export class SearchEngine {
   /**
    * Search notes by content similarity
    */
-  searchByQuery(
+  async searchByQuery(
     queryText: string,
     limit: number = 10,
-    threshold: number = 0.5
-  ): SimilarNote[] {
-    // For now, we'll do a simple keyword match since we don't have
-    // a way to generate embeddings for arbitrary text without the model.
-    // In a full implementation, you'd call the embedding model here.
+    threshold: number = 0.5,
+    contentOptions?: SearchContentOptions
+  ): Promise<SimilarNote[]> {
+    const keywordResults = (): SimilarNote[] => this.keywordSearch(queryText, limit, threshold);
 
+    if (this.embedder?.isAvailable()) {
+      try {
+        const embeddingVector = await this.embedder.embed(queryText);
+        const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
+        if (semanticResults.length > 0) {
+          return this.attachContent(this.mergeResults(semanticResults, keywordResults(), limit), contentOptions);
+        }
+      } catch {
+        // Fall back to keyword search if local embedding fails at query time.
+      }
+    }
+
+    return this.attachContent(keywordResults(), contentOptions);
+  }
+
+  private attachContent(results: SimilarNote[], options?: SearchContentOptions): SimilarNote[] {
+    if (!options?.includeContent) {
+      return results;
+    }
+
+    const maxChars = options.contentMaxChars ?? 2000;
+
+    return results.map((result) => {
+      try {
+        const full = this.loader.readNoteContent(result.path);
+        const truncated = full.length > maxChars;
+        return {
+          ...result,
+          content: truncated ? full.slice(0, maxChars) : full,
+          truncated,
+        };
+      } catch {
+        return result;
+      }
+    });
+  }
+
+  private keywordSearch(queryText: string, limit: number, threshold: number): SimilarNote[] {
     const results: SimilarNote[] = [];
-    const queryLower = queryText.toLowerCase();
+    const queryTokens = this.tokenize(queryText);
+
+    if (queryTokens.length === 0) {
+      return results;
+    }
 
     for (const [path, source] of this.loader.getSources()) {
       try {
-        const content = this.loader.readNoteContent(path).toLowerCase();
-
-        // Simple relevance scoring based on keyword matches
-        const matches = (content.match(new RegExp(queryLower, 'gi')) || []).length;
+        const content = this.loader.readNoteContent(path);
+        const searchableText = `${path}\n${content}`;
+        const searchableTokens = new Set(this.tokenize(searchableText));
+        const matches = queryTokens.filter((token) => searchableTokens.has(token)).length;
 
         if (matches > 0) {
-          // Normalize score (this is a crude approximation)
-          const score = Math.min(matches / 10, 1.0);
+          const score = matches / queryTokens.length;
 
           if (score >= threshold) {
             results.push({
@@ -217,6 +271,25 @@ export class SearchEngine {
       .slice(0, limit);
   }
 
+  private tokenize(text: string): string[] {
+    return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  }
+
+  private mergeResults(primary: SimilarNote[], secondary: SimilarNote[], limit: number): SimilarNote[] {
+    const byPath = new Map<string, SimilarNote>();
+
+    for (const result of [...primary, ...secondary]) {
+      const existing = byPath.get(result.path);
+      if (!existing || result.similarity > existing.similarity) {
+        byPath.set(result.path, result);
+      }
+    }
+
+    return Array.from(byPath.values())
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+  }
+
   /**
    * Get note content with matched blocks highlighted
    */
@@ -229,7 +302,7 @@ export class SearchEngine {
     const availableBlocks = source ? Object.keys(source.blocks || {}) : [];
 
     return {
-      path: notePath,
+      path: source?.path ?? notePath,
       content,
       blocks: availableBlocks
     };
