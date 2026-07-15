@@ -57,6 +57,8 @@ export interface SimilarNote {
     similarity: number;
     blocks?: string[];
     matchedContent?: string;
+    content?: string;
+    truncated?: boolean;
 }
 export interface ConnectionNode {
     root: string;

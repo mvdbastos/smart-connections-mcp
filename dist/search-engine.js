@@ -16,7 +16,7 @@ export class SearchEngine {
     /**
      * Find similar notes to a given note path
      */
-    getSimilarNotes(notePath, threshold = 0.5, limit = 10) {
+    getSimilarNotes(notePath, threshold = 0.5, limit = 10, contentOptions) {
         const source = this.loader.getSource(notePath);
         if (!source) {
             throw new Error(`Note not found: ${notePath}`);
@@ -43,11 +43,12 @@ export class SearchEngine {
         // Find nearest neighbors
         const neighbors = findNearestNeighbors(embeddings.vec, vectors, limit, threshold);
         // Convert to SimilarNote format
-        return neighbors.map(neighbor => ({
+        const results = neighbors.map(neighbor => ({
             path: neighbor.id,
             similarity: neighbor.similarity,
             blocks: neighbor.metadata.blocks
         }));
+        return this.attachContent(results, contentOptions);
     }
     /**
      * Get embedding neighbors for a given embedding vector
@@ -120,21 +121,41 @@ export class SearchEngine {
     /**
      * Search notes by content similarity
      */
-    async searchByQuery(queryText, limit = 10, threshold = 0.5) {
+    async searchByQuery(queryText, limit = 10, threshold = 0.5, contentOptions) {
         const keywordResults = () => this.keywordSearch(queryText, limit, threshold);
         if (this.embedder?.isAvailable()) {
             try {
                 const embeddingVector = await this.embedder.embed(queryText);
                 const semanticResults = this.getEmbeddingNeighbors(embeddingVector, limit, threshold);
                 if (semanticResults.length > 0) {
-                    return this.mergeResults(semanticResults, keywordResults(), limit);
+                    return this.attachContent(this.mergeResults(semanticResults, keywordResults(), limit), contentOptions);
                 }
             }
             catch {
                 // Fall back to keyword search if local embedding fails at query time.
             }
         }
-        return keywordResults();
+        return this.attachContent(keywordResults(), contentOptions);
+    }
+    attachContent(results, options) {
+        if (!options?.includeContent) {
+            return results;
+        }
+        const maxChars = options.contentMaxChars ?? 2000;
+        return results.map((result) => {
+            try {
+                const full = this.loader.readNoteContent(result.path);
+                const truncated = full.length > maxChars;
+                return {
+                    ...result,
+                    content: truncated ? full.slice(0, maxChars) : full,
+                    truncated,
+                };
+            }
+            catch {
+                return result;
+            }
+        });
     }
     keywordSearch(queryText, limit, threshold) {
         const results = [];
