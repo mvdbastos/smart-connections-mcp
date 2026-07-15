@@ -30,7 +30,9 @@ import { Embedder } from './embedder.js';
 import { appendSourceVector } from './ajson-writer.js';
 import { createNote, deleteNote, editNote } from './note-writer.js';
 import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
-import { EditNoteSchema, formatToolError } from './tool-schemas.js';
+import { SyncScheduler } from './sync-scheduler.js';
+import type { SyncStatus } from './sync-scheduler.js';
+import { EditNoteSchema, NoteWorkflowSchema, formatToolError } from './tool-schemas.js';
 import type { EditOptions } from './note-writer.js';
 import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
 
@@ -63,6 +65,38 @@ embedder.tryInit().then(() => {
 
 // Initialize git manager for the vault
 const gitManager = new GitManager(VAULT_ROOT);
+
+const COMMIT_IDLE_MS = parseInt(process.env.SYNC_COMMIT_IDLE_MS ?? '30000', 10);
+const PUSH_IDLE_MS = parseInt(process.env.SYNC_PUSH_IDLE_MS ?? '120000', 10);
+
+const syncScheduler = new SyncScheduler(
+  {
+    commitPaths: (paths, message) =>
+      gitManager.commitSpecific(paths.map((notePath) => path.join(VAULT_ROOT, notePath)), message),
+    push: () => gitManager.push(),
+  },
+  {
+    commitIdleMs: COMMIT_IDLE_MS,
+    pushIdleMs: PUSH_IDLE_MS,
+  }
+);
+
+function buildSyncBlock(status: SyncStatus, deferred: boolean): Record<string, unknown> {
+  const state = status.state === 'commit_pending'
+    ? (deferred ? 'commit_deferred' : 'commit_scheduled')
+    : status.state;
+
+  return {
+    state,
+    commit_in_seconds: status.commitInSeconds,
+    pending_paths: status.pendingPaths,
+    push_after_commit_seconds: Math.round(PUSH_IDLE_MS / 1000),
+    ...(status.lastCommitError ? { error: status.lastCommitError } : {}),
+    ...(status.pushState ? { push_state: status.pushState } : {}),
+  };
+}
+
+const NEXT_STEPS_TEXT = `Changes auto-commit after ${Math.round(COMMIT_IDLE_MS / 1000)}s idle and auto-push ${Math.round(PUSH_IDLE_MS / 1000)}s later. Pass defer_hint_seconds if more edits are coming. No git tool calls needed.`;
 
 console.error('Smart Connections MCP Server initialized successfully');
 console.error(`Vault: ${VAULT_ROOT}`);
@@ -163,6 +197,42 @@ async function embedUpdatedNote(notePath: string): Promise<{ embedded: boolean; 
 
 // Define available tools
 const tools: Tool[] = [
+  {
+    name: 'note_workflow',
+    description:
+      'Create, edit, or delete a vault note in a single call. Writes immediately, refreshes the note embedding, and auto-commits (30s idle) then auto-pushes (2min idle) in the background — no separate git tool calls needed. Preferred over create_note/edit_note/delete_note and the git_* tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['create', 'edit', 'delete'],
+          description: 'Workflow action',
+        },
+        note_path: { type: 'string', description: 'Path to the note, relative to vault root' },
+        content: { type: 'string', description: 'Markdown content; required for create and edit' },
+        frontmatter: { type: 'object', description: 'Optional frontmatter fields (create only)' },
+        mode: {
+          type: 'string',
+          enum: ['overwrite', 'append', 'append-section', 'replace', 'insert-after-heading'],
+          default: 'append',
+          description: 'Edit mode (edit action only). replace requires find; insert-after-heading requires heading.',
+        },
+        heading: { type: 'string', description: 'Heading for append-section or insert-after-heading mode' },
+        find: { type: 'string', description: 'Literal text or regex pattern to find in replace mode' },
+        regex: { type: 'boolean', description: 'Treat find as a regular expression in replace mode' },
+        count: { type: 'number', description: 'Maximum number of replacements in replace mode', minimum: 1 },
+        dry_run: { type: 'boolean', description: 'Preview the edit diff without writing (edit action only)' },
+        defer_hint_seconds: {
+          type: 'number',
+          minimum: 1,
+          maximum: 1800,
+          description: 'Hold auto-commit for at least this many seconds because more writes are coming',
+        },
+      },
+      required: ['action', 'note_path'],
+    },
+  },
   {
     name: 'get_similar_notes',
     description: 'Find notes semantically similar to a given note using embeddings. Returns paths, similarity scores, and available blocks.',
@@ -490,6 +560,66 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case 'note_workflow': {
+        const params = NoteWorkflowSchema.parse(args);
+
+        let targetPath = params.note_path;
+        if (params.action !== 'create') {
+          try {
+            targetPath = loader.resolveNotePath(params.note_path);
+          } catch {
+            // Not indexed yet (e.g. brand-new file): fall back to the literal path.
+          }
+        }
+
+        let payload: Record<string, unknown>;
+        let wroteChanges = false;
+
+        if (params.action === 'create') {
+          createNote(VAULT_ROOT, targetPath, params.content ?? '', params.frontmatter);
+          const embedding = await embedUpdatedNote(targetPath);
+          payload = { action: 'create', note_path: targetPath, written: true, embedding };
+          wroteChanges = true;
+        } else if (params.action === 'edit') {
+          const editResult = editNote(VAULT_ROOT, targetPath, {
+            mode: params.mode,
+            content: params.content,
+            heading: params.heading,
+            find: params.find,
+            regex: params.regex,
+            count: params.count,
+            dryRun: params.dry_run,
+          });
+          wroteChanges = editResult.written && editResult.changed;
+          const embedding = wroteChanges ? await embedUpdatedNote(targetPath) : undefined;
+          payload = { action: 'edit', ...editResult, ...(embedding ? { embedding } : {}) };
+        } else {
+          deleteNote(VAULT_ROOT, targetPath);
+          payload = { action: 'delete', note_path: targetPath, written: true };
+          wroteChanges = true;
+        }
+
+        if (wroteChanges) {
+          try {
+            syncScheduler.markDirty(targetPath, params.defer_hint_seconds);
+          } catch (error) {
+            payload.sync_error = error instanceof Error ? error.message : String(error);
+          }
+        }
+
+        payload.sync = buildSyncBlock(syncScheduler.getStatus(), params.defer_hint_seconds !== undefined);
+        payload.next_steps = NEXT_STEPS_TEXT;
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(payload, null, 2),
+            },
+          ],
+        };
+      }
+
       case 'get_similar_notes': {
         const { note_path, threshold, limit } = GetSimilarNotesSchema.parse(args);
         const results = searchEngine.getSimilarNotes(note_path, threshold, limit);
@@ -559,6 +689,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { note_path, content, frontmatter } = CreateNoteSchema.parse(args);
         createNote(VAULT_ROOT, note_path, content, frontmatter);
         const embedding = await embedUpdatedNote(note_path);
+        syncScheduler.markDirty(note_path);
         const result = { success: true, note_path, ...embedding };
         return {
           content: [
@@ -583,6 +714,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
         const editResult = editNote(VAULT_ROOT, note_path, options);
         const embedding = editResult.written && editResult.changed ? await embedUpdatedNote(note_path) : undefined;
+        if (editResult.written && editResult.changed) {
+          syncScheduler.markDirty(note_path);
+        }
         const result = embedding ? { ...editResult, embedding } : editResult;
         return {
           content: [
@@ -597,6 +731,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'delete_note': {
         const { note_path } = DeleteNoteSchema.parse(args);
         deleteNote(VAULT_ROOT, note_path);
+        syncScheduler.markDirty(note_path);
         const result = { success: true, note_path };
         return {
           content: [
@@ -633,6 +768,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const result: GitCommitResult = gitManager.commitAll(commitMessage, author_name, author_email);
+        if (result.success) {
+          syncScheduler.notifyManualCommit();
+        }
         return {
           content: [
             {
@@ -656,6 +794,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const absolutePaths = note_paths.map((notePath) => path.join(VAULT_ROOT, notePath));
         const result: GitCommitResult = gitManager.commitSpecific(absolutePaths, commitMessage, author_name, author_email);
+        if (result.success) {
+          syncScheduler.notifyManualCommit();
+        }
 
         return {
           content: [
@@ -671,6 +812,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'git_push_notes': {
         SyncNotesSchema.parse(args);
         const result = gitManager.push();
+        if (result.success) {
+          syncScheduler.notifyManualPush();
+        }
         return {
           content: [
             {
@@ -685,6 +829,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'git_sync_notes': {
         SyncNotesSchema.parse(args);
         const result: GitSyncResult = gitManager.syncNotes();
+        if (result.success) {
+          syncScheduler.notifyManualPush();
+        }
         return {
           content: [
             {
