@@ -4,5 +4,6 @@ export declare class Embedder {
     tryInit(): Promise<boolean>;
     isAvailable(): boolean;
     embed(text: string): Promise<number[]>;
+    private truncateToTokenLimit;
 }
 //# sourceMappingURL=embedder.d.ts.map
