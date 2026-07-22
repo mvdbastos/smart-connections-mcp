@@ -34,5 +34,11 @@
     "@vitest/ui": "^2.1.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.2"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true,
+    "onnxruntime-node@1.21.0": true,
+    "protobufjs@7.6.4": true,
+    "sharp@0.34.5": true
   }
 }
