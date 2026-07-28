@@ -7,6 +7,13 @@ export interface SearchResult {
 
 export interface PromptContext {
   search: (query: string, limit: number, threshold: number) => Promise<SearchResult[]>;
+  /**
+   * Optional. Lists vault-relative note paths beginning with `prefix`.
+   * Backed by the loader's indexed sources, so freshly written notes may
+   * lag until reindex — treat results as a display hint, never as an
+   * authoritative migration check.
+   */
+  listByPrefix?: (prefix: string) => Promise<string[]>;
 }
 
 export interface MemoryPromptArgument {
@@ -43,6 +50,10 @@ const DailyNoteArgsSchema = z.object({
 
 const ReviewBeforeWriteArgsSchema = z.object({
   note_path: z.string().min(1, 'note_path required'),
+});
+
+const InitArgsSchema = z.object({
+  project: z.string().optional(),
 });
 
 function formatSearchHits(hits: SearchResult[]): string {
@@ -247,6 +258,138 @@ Read tools remain fully available — \`search_notes\`, \`get_note_content\`, \`
 This cannot stop Claude Code's built-in memory system from writing to \`.claude/projects/<slug>/memory/\`. That behavior lives in the harness, not in this MCP server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
 
 Run the \`init\` prompt again to re-enable autonomous capture.`;
+    },
+  },
+  {
+    name: 'init',
+    description: 'Load standing rules for capturing durable memory into the vault, with the native side reduced to recall stubs.',
+    arguments: [
+      {
+        name: 'project',
+        type: 'string',
+        required: false,
+        description: 'Vault folder name for this project (default: derived from the working directory basename)',
+      },
+    ],
+    build: async (args, ctx) => {
+      const parsed = InitArgsSchema.parse(args);
+      const project = parsed.project ?? '<project>';
+      const memoryRoot = `Memory/${project}`;
+      const today = new Date().toISOString().split('T')[0];
+
+      const projectNote = parsed.project
+        ? ''
+        : `\n\n**First, resolve \`<project>\`.** Take the basename of your working directory — for \`C:\\obsidian\` that is \`obsidian\`, for \`c:\\dev\\00-ProWMS\\pro-wms\` that is \`pro-wms\`. Substitute it for \`<project>\` everywhere below. If \`Memory/MEMORY.md\` already maps your project slug to a different folder name, use that name instead.`;
+
+      let existing = '';
+      try {
+        if (ctx.listByPrefix) {
+          const paths = await ctx.listByPrefix('Memory/');
+          if (paths.length > 0) {
+            existing = `\n\n**Memories already in the vault:**\n${paths.map((notePath) => `- ${notePath}`).join('\n')}\n\nCheck these before capturing anything new.`;
+          }
+        }
+      } catch {
+        // Fail soft; continue with plain instructions
+      }
+
+      return `Autonomous memory capture is now **ACTIVE**.
+
+You keep memory in two tiers. The **Obsidian vault is the system of record** — it holds the full text of every memory. Your native memory directory (\`.claude/projects/<slug>/memory/\`) holds only a **stub**: name, description, and a \`vault_note\` pointer. Native answers "is there something relevant here?"; the vault answers "what does it say?"${projectNote}${existing}
+
+## When to capture
+
+- **\`preference\`** — I correct or reject an approach you proposed, or state a standing rule ("we always X", "never Y here").
+- **\`constraint\`** — a non-obvious environmental or policy limit surfaces (access, tooling, deadlines, org rules).
+- **\`decision\`** — a choice is made whose rationale will not be obvious from the code later.
+- **\`reference\`** — a root cause or mechanism that took real work to find.
+
+## Detecting disagreement
+
+The highest-value trigger and the easiest to miss.
+
+**Explicit signals:** "no", "don't", "instead", "I'd rather", "we don't do that here", "that's wrong".
+
+**Implicit signals:** I revert or rewrite a change you just made; I hand you my own version of code you just wrote; I re-ask a question you already answered.
+
+**Then apply the classifying test** — is the disagreement about *this instance*, or about *how things should be done generally*?
+
+- This instance only: transient. Do not capture.
+- General: durable. Capture as \`preference\`, recording my reasoning under **Why:** and the behavioral change under **How to apply:**.
+
+Ask one clarifying question only when the answer is genuinely ambiguous **and** would change your future behavior. Otherwise infer and capture silently.
+
+## When not to capture
+
+- One-off instructions scoped to the current task.
+- Anything derivable from the repo, git history, or existing docs.
+- A restatement of an existing memory — edit that note instead.
+- Secrets, credentials, tokens, or personal data.
+
+Capture at a task boundary, never mid-step.
+
+## How to capture
+
+1. **Dedupe.** \`search_notes\` for the topic at \`threshold: 0.6\`. If an existing memory covers it, edit that note instead of creating a second.
+2. **Write the vault note** with \`note_workflow action: 'create'\` at \`${memoryRoot}/<Title>.md\`, using the template below.
+3. **Write the native stub** with your own Write tool at \`.claude/projects/<slug>/memory/<name>.md\`, using the stub template below.
+4. **Append to the vault index** \`${memoryRoot}/MEMORY.md\` — \`note_workflow action: 'create'\` seeded with a \`# Memory Index\` heading if that file does not exist yet, otherwise \`action: 'edit', mode: 'append'\`. An \`edit\` against a missing note fails, so check first.
+5. **Append to your native \`MEMORY.md\`** in the usual \`- [Title](file.md) — hook\` format.
+
+Order matters: vault note before stub. If anything fails in between, the native side is still complete and a later retry is safe.
+
+## Migrating on access
+
+Whenever you use a native memory whose frontmatter has **no \`vault_note\` field**, migrate it before acting on it — move its body to the vault, rewrite the file as a stub, add a line to the vault index. Leave your native \`MEMORY.md\` untouched; its link still resolves. Run the \`migrate\` prompt to sweep the whole backlog at once.
+
+## Vault note template
+
+\`\`\`markdown
+---
+title: "No commit trailers"
+date: "${today}"
+topic: "git workflow"
+type: preference
+project_slug: c--dev-00-ProWMS-pro-wms
+native_file: feedback_no_commit_trailers.md
+tags: ["memory", "agent-captured", "git"]
+---
+
+One or two sentences stating the rule.
+
+**Why:** the reasoning I gave, and when I gave it.
+
+**How to apply:** what you do differently next time.
+
+Related: [[Another Memory Note]]
+\`\`\`
+
+Use absolute dates, never "yesterday" or "last week". \`project_slug\` plus \`native_file\` reconstruct the native path exactly, so the vault folder can be renamed freely.
+
+## Native stub template
+
+\`\`\`markdown
+---
+name: feedback-no-commit-trailers
+description: "One line — this is what makes the memory findable later. Keep it specific."
+metadata:
+  node_type: memory
+  type: preference
+  originSessionId: <existing or current session id>
+  modified: <ISO timestamp>
+  vault_note: "${memoryRoot}/No Commit Trailers.md"
+  migrated: "${today}"
+---
+
+Full content lives in the Obsidian vault at \`${memoryRoot}/No Commit Trailers.md\`.
+Read it with \`get_note_content\` before acting on this memory.
+\`\`\`
+
+## Etiquette
+
+Capture silently — one short line of acknowledgment at most, and never interrupt what you are doing. Batch captures with \`defer_hint_seconds: 120\` on every write but the last, so a run of them produces one commit.
+
+Run the \`disable\` prompt to switch this off for the rest of the conversation.`;
     },
   },
 ];

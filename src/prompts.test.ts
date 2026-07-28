@@ -3,8 +3,8 @@ import { MEMORY_PROMPTS, MEMORY_PROMPT_BY_NAME, type PromptContext, type SearchR
 import { z } from 'zod';
 
 describe('prompts', () => {
-  it('should have 6 prompts', () => {
-    expect(MEMORY_PROMPTS).toHaveLength(6);
+  it('should have 7 prompts', () => {
+    expect(MEMORY_PROMPTS).toHaveLength(7);
   });
 
   it('should have unique names', () => {
@@ -49,6 +49,7 @@ describe('prompts', () => {
       daily_note: {},
       review_before_write: { note_path: 'test.md' },
       disable: {},
+      init: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -70,6 +71,7 @@ describe('prompts', () => {
       daily_note: {},
       review_before_write: { note_path: 'test.md' },
       disable: {},
+      init: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -302,6 +304,109 @@ describe('prompts', () => {
       await prompt.build({}, context);
       expect(searchCalled).toBe(false);
       expect(listCalled).toBe(false);
+    });
+  });
+
+  describe('init prompt', () => {
+    const prompt = MEMORY_PROMPT_BY_NAME.get('init')!;
+
+    it('should declare an optional project argument', () => {
+      expect(prompt.arguments).toContainEqual(
+        expect.objectContaining({ name: 'project', required: false })
+      );
+    });
+
+    it('should build without arguments and explain how to derive the project', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/<project>/);
+      expect(text).toMatch(/basename/i);
+    });
+
+    it('should substitute a provided project into vault paths', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({ project: 'pro-wms' }, context);
+      expect(text).toMatch(/Memory\/pro-wms/);
+      expect(text).not.toMatch(/<project>/);
+    });
+
+    it('should include disagreement trigger phrases', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/I'd rather/);
+      expect(text).toMatch(/we don't do that here/);
+      expect(text).toMatch(/this instance/i);
+    });
+
+    it('should include both the vault note and native stub templates', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/native_file:/);
+      expect(text).toMatch(/vault_note:/);
+      expect(text).toMatch(/\*\*Why:\*\*/);
+      expect(text).toMatch(/\*\*How to apply:\*\*/);
+    });
+
+    it('should include the lazy migration rule', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/no `vault_note`/);
+      expect(text).toMatch(/migrate it before acting/i);
+    });
+
+    it("should include today's ISO date", async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      const today = new Date().toISOString().split('T')[0];
+      expect(text).toContain(today);
+    });
+
+    it('should render existing memories when listByPrefix resolves', async () => {
+      const context: PromptContext = {
+        search: async () => [],
+        listByPrefix: async () => ['Memory/pro-wms/No Commit Trailers.md', 'Memory/obsidian/Vault Rules.md'],
+      };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/No Commit Trailers\.md/);
+      expect(text).toMatch(/Vault Rules\.md/);
+    });
+
+    it('should fail soft when listByPrefix resolves empty', async () => {
+      const context: PromptContext = { search: async () => [], listByPrefix: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/undefined|null/);
+    });
+
+    it('should fail soft when listByPrefix rejects', async () => {
+      const context: PromptContext = {
+        search: async () => [],
+        listByPrefix: async () => {
+          throw new Error('loader unavailable');
+        },
+      };
+      const text = await prompt.build({}, context);
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/loader unavailable/);
+    });
+
+    it('should fail soft when listByPrefix is absent', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/undefined/);
+    });
+
+    it('should not call search', async () => {
+      let searchCalled = false;
+      const context: PromptContext = {
+        search: async () => {
+          searchCalled = true;
+          return [];
+        },
+      };
+      await prompt.build({}, context);
+      expect(searchCalled).toBe(false);
     });
   });
 

@@ -597,6 +597,10 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
       const results = await searchEngine.searchByQuery(query, limit, threshold);
       return results.map((r) => ({ path: r.path, score: r.similarity }));
     },
+    listByPrefix: async (prefix: string) =>
+      Array.from(loader.getSources().keys())
+        .filter((notePath) => notePath.startsWith(prefix))
+        .sort(),
   };
 
   const text = await prompt.build(request.params.arguments || {}, context);
