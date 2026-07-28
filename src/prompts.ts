@@ -225,6 +225,30 @@ Let the auto-sync handle commit and push.`;
 Auto-sync will commit and push your changes.`;
     },
   },
+  {
+    name: 'disable',
+    description: 'Suspend autonomous memory capture and migration for the rest of this conversation.',
+    arguments: [],
+    build: async () => {
+      return `Autonomous memory capture is now **OFF** for the rest of this conversation.
+
+## Stop doing
+
+- Do not capture preferences, constraints, or decisions on your own initiative.
+- Do not migrate native memory files into the vault when you read them.
+- Make no \`note_workflow\` calls unless I explicitly ask for a specific note.
+
+## Keep doing
+
+Read tools remain fully available — \`search_notes\`, \`get_note_content\`, \`get_similar_notes\`, \`get_connection_graph\`, \`get_embedding_neighbors\`, and \`get_stats\` all work normally. This switch governs writes, not reads. Keep using the vault to answer questions.
+
+## Known limitation
+
+This cannot stop Claude Code's built-in memory system from writing to \`.claude/projects/<slug>/memory/\`. That behavior lives in the harness, not in this MCP server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
+
+Run the \`init\` prompt again to re-enable autonomous capture.`;
+    },
+  },
 ];
 
 export const MEMORY_PROMPT_BY_NAME = new Map(MEMORY_PROMPTS.map((item) => [item.name, item]));

@@ -3,8 +3,8 @@ import { MEMORY_PROMPTS, MEMORY_PROMPT_BY_NAME, type PromptContext, type SearchR
 import { z } from 'zod';
 
 describe('prompts', () => {
-  it('should have 5 prompts', () => {
-    expect(MEMORY_PROMPTS).toHaveLength(5);
+  it('should have 6 prompts', () => {
+    expect(MEMORY_PROMPTS).toHaveLength(6);
   });
 
   it('should have unique names', () => {
@@ -48,6 +48,7 @@ describe('prompts', () => {
       cleanup_stale: { query: 'test' },
       daily_note: {},
       review_before_write: { note_path: 'test.md' },
+      disable: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -68,6 +69,7 @@ describe('prompts', () => {
       cleanup_stale: { query: 'test' },
       daily_note: {},
       review_before_write: { note_path: 'test.md' },
+      disable: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -246,6 +248,60 @@ describe('prompts', () => {
       };
       await prompt.build({ note_path: 'Note.md' }, context);
       expect(searchCalled).toBe(false);
+    });
+  });
+
+  describe('disable prompt', () => {
+    const prompt = MEMORY_PROMPT_BY_NAME.get('disable')!;
+
+    it('should declare no arguments', () => {
+      expect(prompt.arguments).toEqual([]);
+    });
+
+    it('should state that capture is off', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/OFF|off/);
+      expect(text).toMatch(/do not capture/i);
+    });
+
+    it('should preserve read tools explicitly', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/search_notes/);
+      expect(text).toMatch(/get_note_content/);
+      expect(text).toMatch(/writes, not reads/i);
+    });
+
+    it('should disclose that native memory writing continues', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/harness/i);
+      expect(text).toMatch(/backlog/i);
+    });
+
+    it('should name init as the re-enable path', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/\binit\b/);
+    });
+
+    it('should call neither search nor listByPrefix', async () => {
+      let searchCalled = false;
+      let listCalled = false;
+      const context: PromptContext = {
+        search: async () => {
+          searchCalled = true;
+          return [];
+        },
+      };
+      (context as { listByPrefix?: unknown }).listByPrefix = async () => {
+        listCalled = true;
+        return [];
+      };
+      await prompt.build({}, context);
+      expect(searchCalled).toBe(false);
+      expect(listCalled).toBe(false);
     });
   });
 
