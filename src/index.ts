@@ -31,7 +31,8 @@ import { Embedder } from './embedder.js';
 import { appendSourceVector } from './ajson-writer.js';
 import { createNote, deleteNote, editNote } from './note-writer.js';
 import { UsageLog } from './tool-usage-log.js';
-import { MEMORY_GUIDE_BY_URI, MEMORY_GUIDES, MEMORY_PROMPTS } from './guides.js';
+import { MEMORY_RESOURCE_BY_URI, MEMORY_RESOURCES } from './resources.js';
+import { MEMORY_PROMPT_BY_NAME, type PromptContext } from './prompts.js';
 import { SyncScheduler } from './sync-scheduler.js';
 import type { SyncStatus } from './sync-scheduler.js';
 import { EditNoteSchema, NoteWorkflowSchema, formatToolError } from './tool-schemas.js';
@@ -547,28 +548,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(ListResourcesRequestSchema, async () => {
   return {
-    resources: MEMORY_GUIDES.map((guide) => ({
-      uri: guide.uri,
-      name: guide.name,
-      description: guide.description,
+    resources: MEMORY_RESOURCES.map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      description: resource.description,
       mimeType: 'text/markdown',
     })),
   };
 });
 
 server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-  const guide = MEMORY_GUIDE_BY_URI.get(request.params.uri);
+  const resource = MEMORY_RESOURCE_BY_URI.get(request.params.uri);
 
-  if (!guide) {
+  if (!resource) {
     throw new Error(`Unknown resource: ${request.params.uri}`);
   }
 
   return {
     contents: [
       {
-        uri: guide.uri,
+        uri: resource.uri,
         mimeType: 'text/markdown',
-        text: guide.text,
+        text: resource.text,
       },
     ],
   };
@@ -576,19 +577,33 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
 server.setRequestHandler(ListPromptsRequestSchema, async () => {
   return {
-    prompts: MEMORY_PROMPTS.map((prompt) => ({
+    prompts: Array.from(MEMORY_PROMPT_BY_NAME.values()).map((prompt) => ({
       name: prompt.name,
       description: prompt.description,
+      arguments: prompt.arguments,
     })),
   };
 });
 
 server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-  const prompt = MEMORY_PROMPTS.find((item) => item.name === request.params.name);
+  const prompt = MEMORY_PROMPT_BY_NAME.get(request.params.name);
 
   if (!prompt) {
     throw new Error(`Unknown prompt: ${request.params.name}`);
   }
+
+  const context: PromptContext = {
+    search: async (query: string, limit: number, threshold: number) => {
+      const results = await searchEngine.searchByQuery(query, limit, threshold);
+      return results.map((r) => ({ path: r.path, score: r.similarity }));
+    },
+    listByPrefix: async (prefix: string) =>
+      Array.from(loader.getSources().keys())
+        .filter((notePath) => notePath.startsWith(prefix))
+        .sort(),
+  };
+
+  const text = await prompt.build(request.params.arguments || {}, context);
 
   return {
     description: prompt.description,
@@ -597,7 +612,7 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
         role: 'user',
         content: {
           type: 'text',
-          text: prompt.text,
+          text,
         },
       },
     ],
