@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MEMORY_RESOURCES, MEMORY_RESOURCE_BY_URI } from './resources';
+import { MEMORY_PROMPTS } from './prompts';
 
 describe('resources', () => {
   it('should have 4 resources', () => {
@@ -112,6 +113,12 @@ describe('resources', () => {
 
     it('should describe the vault as the system of record', () => {
       expect(indexResource.text).toMatch(/system of record/i);
+    });
+
+    it('lists every registered prompt', () => {
+      for (const p of MEMORY_PROMPTS) {
+        expect(indexResource.text).toContain(p.name);
+      }
     });
   });
 });

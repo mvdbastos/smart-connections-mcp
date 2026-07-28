@@ -4,6 +4,13 @@ export interface SearchResult {
 }
 export interface PromptContext {
     search: (query: string, limit: number, threshold: number) => Promise<SearchResult[]>;
+    /**
+     * Optional. Lists vault-relative note paths beginning with `prefix`.
+     * Backed by the loader's indexed sources, so freshly written notes may
+     * lag until reindex — treat results as a display hint, never as an
+     * authoritative migration check.
+     */
+    listByPrefix?: (prefix: string) => Promise<string[]>;
 }
 export interface MemoryPromptArgument {
     name: string;

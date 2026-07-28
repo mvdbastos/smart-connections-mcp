@@ -290,7 +290,7 @@ Run the \`init\` prompt again to re-enable autonomous capture.`;
         if (ctx.listByPrefix) {
           const paths = await ctx.listByPrefix('Memory/');
           if (paths.length > 0) {
-            existing = `\n\n**Memories already in the vault:**\n${paths.map((notePath) => `- ${notePath}`).join('\n')}\n\nCheck these before capturing anything new.`;
+            existing = `\n\n**Memories already in the vault:**\n${paths.map((notePath) => `- ${notePath}`).join('\n')}\n\nCheck these before capturing anything new. This listing lags behind recent writes, so treat it as a hint only.`;
           }
         }
       } catch {
@@ -339,8 +339,9 @@ Capture at a task boundary, never mid-step.
 3. **Write the native stub** with your own Write tool at \`.claude/projects/<slug>/memory/<name>.md\`, using the stub template below.
 4. **Append to the vault index** \`${memoryRoot}/MEMORY.md\` — \`note_workflow action: 'create'\` seeded with a \`# Memory Index\` heading if that file does not exist yet, otherwise \`action: 'edit', mode: 'append'\`. An \`edit\` against a missing note fails, so check first.
 5. **Append to your native \`MEMORY.md\`** in the usual \`- [Title](file.md) — hook\` format.
+6. **Ensure the root index has an entry.** If \`Memory/MEMORY.md\` has no line for this project, append one — \`note_workflow action: 'create'\` seeded with a \`# Memory Index\` heading if the file doesn't exist yet, otherwise \`action: 'edit', mode: 'append'\`.
 
-Order matters: vault note before stub. If anything fails in between, the native side is still complete and a later retry is safe.
+Order matters: vault note before stub. A stub is a pointer; writing one before its target exists creates a dangling reference. If the stub write fails after the vault note lands, re-run step 3 — the vault note is already correct.
 
 ## Migrating on access
 
@@ -422,7 +423,8 @@ Run the \`disable\` prompt to switch this off for the rest of the conversation.`
       let alreadyThere = '';
       try {
         if (ctx.listByPrefix) {
-          const paths = await ctx.listByPrefix(`${memoryRoot}/`);
+          const listPrefix = parsed.project ? `${memoryRoot}/` : 'Memory/';
+          const paths = await ctx.listByPrefix(listPrefix);
           if (paths.length > 0) {
             alreadyThere = `\n\n**Already in the vault for this project:**\n${paths.map((notePath) => `- ${notePath}`).join('\n')}\n\nThis listing lags behind recent writes, so treat it as a hint only.`;
           }
@@ -499,6 +501,8 @@ metadata:
 Full content lives in the Obsidian vault at \`${memoryRoot}/No Commit Trailers.md\`.
 Read it with \`get_note_content\` before acting on this memory.
 \`\`\`
+
+\`migrated\` is an informational timestamp only — \`vault_note\` presence is still the sole thing that gates migration behavior anywhere in this system.
 
 ## When done
 

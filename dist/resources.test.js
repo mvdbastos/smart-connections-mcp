@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MEMORY_RESOURCES, MEMORY_RESOURCE_BY_URI } from './resources';
+import { MEMORY_PROMPTS } from './prompts';
 describe('resources', () => {
     it('should have 4 resources', () => {
         expect(MEMORY_RESOURCES).toHaveLength(4);
@@ -84,6 +85,22 @@ describe('resources', () => {
         it('should mention embedding model and fallback behavior', () => {
             const embeddingsResource = MEMORY_RESOURCES.find((r) => r.uri === 'memory-guide://embeddings');
             expect(embeddingsResource?.text).toMatch(/bge-micro|TaylorAI|fallback|keyword/i);
+        });
+    });
+    describe('index resource prompt listing', () => {
+        const indexResource = MEMORY_RESOURCE_BY_URI.get('memory-guide://index');
+        it('should list the three memory-capture prompts', () => {
+            expect(indexResource.text).toMatch(/\binit\b/);
+            expect(indexResource.text).toMatch(/\bmigrate\b/);
+            expect(indexResource.text).toMatch(/\bdisable\b/);
+        });
+        it('should describe the vault as the system of record', () => {
+            expect(indexResource.text).toMatch(/system of record/i);
+        });
+        it('lists every registered prompt', () => {
+            for (const p of MEMORY_PROMPTS) {
+                expect(indexResource.text).toContain(p.name);
+            }
         });
     });
 });

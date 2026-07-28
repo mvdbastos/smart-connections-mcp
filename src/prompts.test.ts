@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { MEMORY_PROMPTS, MEMORY_PROMPT_BY_NAME, type PromptContext, type SearchResult } from './prompts';
-import { z } from 'zod';
 
 describe('prompts', () => {
   it('should have 8 prompts', () => {

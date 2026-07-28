@@ -11,7 +11,7 @@ export declare const EditNoteSchema: z.ZodEffects<z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     content: string;
     note_path: string;
-    mode: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading";
+    mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
     find?: string | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
@@ -21,7 +21,7 @@ export declare const EditNoteSchema: z.ZodEffects<z.ZodObject<{
     content: string;
     note_path: string;
     find?: string | undefined;
-    mode?: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading" | undefined;
+    mode?: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading" | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
     count?: number | undefined;
@@ -29,7 +29,7 @@ export declare const EditNoteSchema: z.ZodEffects<z.ZodObject<{
 }>, {
     content: string;
     note_path: string;
-    mode: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading";
+    mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
     find?: string | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
@@ -39,7 +39,7 @@ export declare const EditNoteSchema: z.ZodEffects<z.ZodObject<{
     content: string;
     note_path: string;
     find?: string | undefined;
-    mode?: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading" | undefined;
+    mode?: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading" | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
     count?: number | undefined;
@@ -59,7 +59,7 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     defer_hint_seconds: z.ZodOptional<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     note_path: string;
-    mode: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading";
+    mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
     action: "create" | "edit" | "delete";
     find?: string | undefined;
     content?: string | undefined;
@@ -74,7 +74,7 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     action: "create" | "edit" | "delete";
     find?: string | undefined;
     content?: string | undefined;
-    mode?: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading" | undefined;
+    mode?: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading" | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
     count?: number | undefined;
@@ -83,7 +83,7 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     defer_hint_seconds?: number | undefined;
 }>, {
     note_path: string;
-    mode: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading";
+    mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
     action: "create" | "edit" | "delete";
     find?: string | undefined;
     content?: string | undefined;
@@ -98,7 +98,7 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     action: "create" | "edit" | "delete";
     find?: string | undefined;
     content?: string | undefined;
-    mode?: "replace" | "append-section" | "overwrite" | "append" | "insert-after-heading" | undefined;
+    mode?: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading" | undefined;
     heading?: string | undefined;
     regex?: boolean | undefined;
     count?: number | undefined;
