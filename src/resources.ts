@@ -50,6 +50,16 @@ Sync happens automatically:
 
 No git tool calls needed. See **sync** resource for details.
 
+## Prompts
+
+Three prompts manage durable memory. The **Obsidian vault is the system of record** for memory content; Claude Code's native memory directory keeps only a stub with a \`vault_note\` pointer.
+
+- **init**: Load standing capture rules — what qualifies as durable memory, how to detect disagreement, and how to write both the vault note and the native stub.
+- **migrate**: Sweep this project's native memory files into the vault, leaving stubs behind.
+- **disable**: Suspend autonomous capture for the rest of the conversation.
+
+Five task prompts also exist: **capture_memory**, **project_research**, **cleanup_stale**, **daily_note**, and **review_before_write**.
+
 ## Embeddings
 
 Notes are embedded on create/edit for semantic search. See **embeddings** resource.`

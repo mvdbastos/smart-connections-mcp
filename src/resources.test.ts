@@ -100,4 +100,18 @@ describe('resources', () => {
       expect(embeddingsResource?.text).toMatch(/bge-micro|TaylorAI|fallback|keyword/i);
     });
   });
+
+  describe('index resource prompt listing', () => {
+    const indexResource = MEMORY_RESOURCE_BY_URI.get('memory-guide://index')!;
+
+    it('should list the three memory-capture prompts', () => {
+      expect(indexResource.text).toMatch(/\binit\b/);
+      expect(indexResource.text).toMatch(/\bmigrate\b/);
+      expect(indexResource.text).toMatch(/\bdisable\b/);
+    });
+
+    it('should describe the vault as the system of record', () => {
+      expect(indexResource.text).toMatch(/system of record/i);
+    });
+  });
 });

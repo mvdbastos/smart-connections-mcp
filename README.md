@@ -398,13 +398,21 @@ The MCP server exposes **resources** (read-only reference docs) and **prompts** 
 
 Parameterized action templates. Use `ListPrompts` to see all prompts and their arguments.
 
+**Memory management.** The Obsidian vault is the system of record for agent memory; Claude Code's native memory directory keeps only a stub carrying `name`, `description`, and a `vault_note` pointer.
+
+- **`init` `(project?)`**: Load standing rules for capturing durable memory — triggers, disagreement detection, do-not-capture guards, and both the vault-note and native-stub templates. Pre-fetches everything already under `Memory/`.
+- **`migrate` `(project?)`**: Sweep this project's native memory files into the vault. Keys off `metadata.vault_note` as the only authoritative migrated-flag; always writes the vault note before rewriting the stub so a failed run stays recoverable.
+- **`disable`**: Suspend autonomous capture and lazy migration for the rest of the conversation. Read tools stay available. Cannot stop Claude Code's built-in memory writing — those files become migration backlog instead.
+
+**Task templates.**
+
 - **`capture_memory` `(topic, tags?)`**: Create and persist a new memory note. Pre-fetches existing notes on the topic to avoid duplication.
 - **`project_research` `(topic)`**: Build context before answering by searching and reading existing notes. Pre-fetches seed notes.
 - **`cleanup_stale` `(query)`**: Identify and safely remove obsolete notes. Pre-fetches candidates matching the query.
 - **`daily_note` `(heading?)`**: Append a dated section to a daily note with instructions for safe editing.
 - **`review_before_write` `(note_path)`**: Read a note before editing, with guidance on edit modes and safe changes.
 
-The first three prompts pre-fetch vault results at prompt-generation time for faster context buildup. All prompts guide the model toward `note_workflow` and auto-sync; none instruct manual git tool calls.
+Search-shaped prompts pre-fetch vault results at prompt-generation time for faster context buildup. All prompts guide the model toward `note_workflow` and auto-sync; none instruct manual git tool calls.
 
 ## Usage Examples
 
