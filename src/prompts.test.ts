@@ -3,8 +3,8 @@ import { MEMORY_PROMPTS, MEMORY_PROMPT_BY_NAME, type PromptContext, type SearchR
 import { z } from 'zod';
 
 describe('prompts', () => {
-  it('should have 7 prompts', () => {
-    expect(MEMORY_PROMPTS).toHaveLength(7);
+  it('should have 8 prompts', () => {
+    expect(MEMORY_PROMPTS).toHaveLength(8);
   });
 
   it('should have unique names', () => {
@@ -50,6 +50,7 @@ describe('prompts', () => {
       review_before_write: { note_path: 'test.md' },
       disable: {},
       init: {},
+      migrate: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -72,6 +73,7 @@ describe('prompts', () => {
       review_before_write: { note_path: 'test.md' },
       disable: {},
       init: {},
+      migrate: {},
     };
 
     for (const prompt of MEMORY_PROMPTS) {
@@ -376,6 +378,103 @@ describe('prompts', () => {
       const text = await prompt.build({}, context);
       expect(text).toBeTruthy();
       expect(text).not.toMatch(/undefined|null/);
+    });
+
+    it('should fail soft when listByPrefix rejects', async () => {
+      const context: PromptContext = {
+        search: async () => [],
+        listByPrefix: async () => {
+          throw new Error('loader unavailable');
+        },
+      };
+      const text = await prompt.build({}, context);
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/loader unavailable/);
+    });
+
+    it('should fail soft when listByPrefix is absent', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/undefined/);
+    });
+
+    it('should not call search', async () => {
+      let searchCalled = false;
+      const context: PromptContext = {
+        search: async () => {
+          searchCalled = true;
+          return [];
+        },
+      };
+      await prompt.build({}, context);
+      expect(searchCalled).toBe(false);
+    });
+  });
+
+  describe('migrate prompt', () => {
+    const prompt = MEMORY_PROMPT_BY_NAME.get('migrate')!;
+
+    it('should declare an optional project argument', () => {
+      expect(prompt.arguments).toContainEqual(
+        expect.objectContaining({ name: 'project', required: false })
+      );
+    });
+
+    it('should substitute a provided project into vault paths', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({ project: 'pro-wms' }, context);
+      expect(text).toMatch(/Memory\/pro-wms/);
+    });
+
+    it('should contain all nine numbered steps', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+        expect(text).toMatch(new RegExp(`^${n}\\. `, 'm'));
+      }
+    });
+
+    it('should state the vault-note-before-stub ordering requirement', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/before rewriting the stub/i);
+      expect(text).toMatch(/loses data/i);
+    });
+
+    it('should state the vault_note skip rule as authoritative', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/already migrated/i);
+      expect(text).toMatch(/only authoritative/i);
+    });
+
+    it('should include the dedupe step', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/search_notes/);
+      expect(text).toMatch(/0\.6/);
+    });
+
+    it('should instruct batching with defer_hint_seconds', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/defer_hint_seconds/);
+    });
+
+    it('should leave native MEMORY.md untouched', async () => {
+      const context: PromptContext = { search: async () => [] };
+      const text = await prompt.build({}, context);
+      expect(text).toMatch(/native `MEMORY\.md` alone|Leave your native/i);
+    });
+
+    it('should render an already-migrated hint when listByPrefix resolves', async () => {
+      const context: PromptContext = {
+        search: async () => [],
+        listByPrefix: async () => ['Memory/pro-wms/No Commit Trailers.md'],
+      };
+      const text = await prompt.build({ project: 'pro-wms' }, context);
+      expect(text).toMatch(/No Commit Trailers\.md/);
     });
 
     it('should fail soft when listByPrefix rejects', async () => {

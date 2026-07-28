@@ -56,6 +56,10 @@ const InitArgsSchema = z.object({
   project: z.string().optional(),
 });
 
+const MigrateArgsSchema = z.object({
+  project: z.string().optional(),
+});
+
 function formatSearchHits(hits: SearchResult[]): string {
   if (hits.length === 0) return '';
   return hits.map((hit) => `- ${hit.path} (${hit.score.toFixed(2)})`).join('\n');
@@ -392,6 +396,113 @@ Read it with \`get_note_content\` before acting on this memory.
 Capture silently — one short line of acknowledgment at most, and never interrupt what you are doing. Batch captures with \`defer_hint_seconds: 120\` on every write but the last, so a run of them produces one commit.
 
 Run the \`disable\` prompt to switch this off for the rest of the conversation.`;
+    },
+  },
+  {
+    name: 'migrate',
+    description: 'Sweep this project\'s native memory files into the vault, leaving recall stubs behind.',
+    arguments: [
+      {
+        name: 'project',
+        type: 'string',
+        required: false,
+        description: 'Vault folder name for this project (default: derived from the working directory basename)',
+      },
+    ],
+    build: async (args, ctx) => {
+      const parsed = MigrateArgsSchema.parse(args);
+      const project = parsed.project ?? '<project>';
+      const memoryRoot = `Memory/${project}`;
+      const today = new Date().toISOString().split('T')[0];
+
+      const projectNote = parsed.project
+        ? ''
+        : `\n\n**First, resolve \`<project>\`.** Take the basename of your working directory — for \`C:\\obsidian\` that is \`obsidian\`, for \`c:\\dev\\00-ProWMS\\pro-wms\` that is \`pro-wms\`. Substitute it for \`<project>\` everywhere below. If \`Memory/MEMORY.md\` already maps your project slug to a different folder name, use that name instead.`;
+
+      let alreadyThere = '';
+      try {
+        if (ctx.listByPrefix) {
+          const paths = await ctx.listByPrefix(`${memoryRoot}/`);
+          if (paths.length > 0) {
+            alreadyThere = `\n\n**Already in the vault for this project:**\n${paths.map((notePath) => `- ${notePath}`).join('\n')}\n\nThis listing lags behind recent writes, so treat it as a hint only.`;
+          }
+        }
+      } catch {
+        // Fail soft; continue with plain instructions
+      }
+
+      return `Sweep your native memory directory and move every unmigrated memory into the Obsidian vault. The vault becomes the full record; each native file is reduced to a stub that still drives recall.${projectNote}${alreadyThere}
+
+## Find the backlog
+
+List every \`.md\` file in \`.claude/projects/<slug>/memory/\` except \`MEMORY.md\`, and read each one's frontmatter. **A file with a \`vault_note\` field under \`metadata\` is already migrated — skip it.** That field is the only authoritative marker; never infer migration state from the vault listing, which lags until notes are indexed.
+
+Report the files you are about to migrate before writing anything. You do not need to wait for confirmation — invoking this prompt is the confirmation.
+
+## Migrate each file
+
+1. **Read** the native file. Skip it if \`metadata.vault_note\` already exists.
+2. **Parse** \`name\`, \`description\`, \`metadata.type\`, \`metadata.originSessionId\`, \`metadata.modified\`, and the body.
+3. **Derive the title.** Use the link text from your native \`MEMORY.md\` when the file has an entry there — it is already human-written. Otherwise convert \`name\` from kebab-case to Title Case.
+4. **Resolve the project folder.** Look up the project slug in \`Memory/MEMORY.md\`. If there is no entry, add one using your working directory basename. If \`Memory/MEMORY.md\` itself does not exist, create it with \`note_workflow action: 'create'\` and a \`# Memory Index\` heading.
+5. **Dedupe.** \`search_notes\` on the title plus description at \`threshold: 0.6\`. If a vault note already covers this memory, edit that note rather than creating a second one.
+6. **Write the vault note** with \`note_workflow action: 'create'\` at \`${memoryRoot}/<Title>.md\`. Copy the body verbatim. Set \`date\` from the original \`metadata.modified\` — preserve the memory's history, do not stamp today.
+7. **Rewrite the native file as a stub** with your own Write tool. Preserve \`name\`, \`description\`, \`originSessionId\`, and \`modified\` exactly as they were, add \`vault_note\` and \`migrated\`, and replace the body with a pointer.
+8. **Append to \`${memoryRoot}/MEMORY.md\`** in \`- [Title](file.md) — hook\` format. Use \`note_workflow action: 'create'\` seeded with a \`# Memory Index\` heading if the index does not exist yet, and \`action: 'edit', mode: 'append'\` thereafter. An \`edit\` against a missing note fails, so check first.
+9. **Leave your native \`MEMORY.md\` alone.** Its link still points at a file that exists.
+
+## Ordering is a correctness requirement
+
+Always write the vault note (step 6) **before rewriting the stub** (step 7). If anything fails between them, the native file still holds the full body and has no \`vault_note\`, so re-running this prompt is safe and step 5 absorbs the orphaned vault note. The reverse order loses data permanently.
+
+## Batching
+
+Pass \`defer_hint_seconds: 120\` on every \`note_workflow\` write except the last. Five memories should produce one commit, not five.
+
+## Vault note template
+
+\`\`\`markdown
+---
+title: "No commit trailers"
+date: "2026-07-27"
+topic: "git workflow"
+type: feedback
+project_slug: c--dev-00-ProWMS-pro-wms
+native_file: feedback_no_commit_trailers.md
+tags: ["memory", "agent-captured", "git"]
+---
+
+The original body, copied verbatim.
+
+**Why:** ...
+
+**How to apply:** ...
+\`\`\`
+
+Keep whatever \`metadata.type\` the native file already had. \`date\` comes from \`metadata.modified\`, not from today.
+
+## Native stub template
+
+\`\`\`markdown
+---
+name: feedback-no-commit-trailers
+description: "Unchanged — copy the original description exactly."
+metadata:
+  node_type: memory
+  type: feedback
+  originSessionId: af0c4ad5-dd48-4a33-b7ae-507231676945
+  modified: 2026-07-27T12:06:15.005Z
+  vault_note: "${memoryRoot}/No Commit Trailers.md"
+  migrated: "${today}"
+---
+
+Full content lives in the Obsidian vault at \`${memoryRoot}/No Commit Trailers.md\`.
+Read it with \`get_note_content\` before acting on this memory.
+\`\`\`
+
+## When done
+
+Report how many memories moved and how many were skipped as already migrated.`;
     },
   },
 ];
