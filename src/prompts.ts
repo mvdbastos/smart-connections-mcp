@@ -376,7 +376,7 @@ metadata:
   node_type: memory
   type: preference
   originSessionId: <existing or current session id>
-  modified: <ISO timestamp>
+  modified: <ISO timestamp — preserved byte-for-byte when migrating, current time when capturing fresh>
   vault_note: "${memoryRoot}/No Commit Trailers.md"
   migrated: "${today}"
 ---
@@ -384,6 +384,8 @@ metadata:
 Full content lives in the Obsidian vault at \`${memoryRoot}/No Commit Trailers.md\`.
 Read it with \`get_note_content\` before acting on this memory.
 \`\`\`
+
+\`migrated\` is an informational timestamp only — \`vault_note\` presence is still the sole thing that gates migration behavior anywhere in this system.
 
 ## Etiquette
 
