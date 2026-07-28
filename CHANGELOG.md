@@ -8,9 +8,18 @@
 - Opt-in deprecated-tool usage logging via `--log-usage[=<path>]`, queued in memory and flushed during idle windows to `logs/mcp-tool-usage.log` outside the vault.
 - `include_content`/`content_max_chars` on `search_notes` and `get_similar_notes`.
 - `sync` status block in `get_stats`.
+- Reorganized MCP resources and prompts:
+  - **Resources** (read-only reference docs): `memory-guide://index`, `memory-guide://tools` (tool map + deprecations), `memory-guide://sync` (idle-debounce timing), `memory-guide://embeddings` (model behavior).
+  - **Prompts** (parameterized action templates): `capture_memory`, `project_research`, `cleanup_stale`, `daily_note`, `review_before_write`. Search-shaped prompts (`capture_memory`, `project_research`, `cleanup_stale`) pre-fetch vault results and embed them in the message for faster context buildup.
 
 ### Changed
 - Deprecated (still functional): `create_note`, `edit_note`, `delete_note`, `git_commit_notes`, `git_commit_notes_specific`, `git_push_notes`, `git_sync_notes`.
+
+### Breaking
+- Deleted old resource URIs and prompt names. Clients must update to the new resource/prompt names:
+  - Old: `memory-guide://search`, `memory-guide://similar`, `memory-guide://graph`, `memory-guide://read`, `memory-guide://create`, `memory-guide://edit`, `memory-guide://append-section`, `memory-guide://delete`, `memory-guide://embed-status`, `memory-guide://commit`, `memory-guide://push`, `memory-guide://sync`, `memory-guide://recipe-*`.
+  - New: Four resources (`index`, `tools`, `sync`, `embeddings`) + five prompts (with arguments).
+  - Prompts now declare `arguments` in `ListPrompts` output; `GetPrompt` accepts `arguments` parameter for prompt-specific configuration.
 
 ## git-integration
 
