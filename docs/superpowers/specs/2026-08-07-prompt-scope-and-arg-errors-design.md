@@ -18,7 +18,7 @@ This is Group A of three. The six open issues decompose into:
 | B | #4, #7 | Index/filesystem desync — phantom paths, silent note fabrication |
 | C | #5, #8 | Sync durability — stale pathspec poisoning, non-persistent commit state |
 
-Groups B and C get their own spec, plan, and branch.
+Groups B and C get their own spec, plan, and branch. All three are implemented **in parallel** and merged together at the end — see [Parallel execution](#parallel-execution).
 
 ### What #10 actually is
 
@@ -151,6 +151,27 @@ No new runtime failure modes. Both components are validation and static text.
 
 All 143 existing tests must stay green. `.strict()` is not expected to disturb them — `index.test.ts` passes only known keys.
 
+## Parallel execution
+
+Groups A, B, and C run as three concurrent branches off `main`, merged only at the end. The subsystems barely overlap in source:
+
+| File | A | B | C | Merge risk |
+|---|---|---|---|---|
+| `src/index.ts` | `inputSchema` ~233, ~445 | `listByPrefix` ~600, handler ~664 | sync wiring ~96, `delete_note` ~832 | Low — disjoint regions |
+| `src/prompts.ts`, `src/tool-schemas.ts` | ✓ | — | — | None |
+| `src/smart-connections-loader.ts`, `src/note-writer.ts` | — | ✓ | — | None |
+| `src/sync-scheduler.ts`, `src/git-manager.ts` | — | — | ✓ | None |
+| `CHANGELOG.md` | ✓ | ✓ | ✓ | Small, predictable |
+| `dist/**` (75 tracked files) | ✓ | ✓ | ✓ | **Guaranteed, unmergeable** |
+
+**`dist/` is compiled output and is tracked in git.** Three branches each rebuilding it would conflict across ~75 generated files on every merge after the first, and such a conflict has no meaningful resolution — the only correct answer is to rebuild, never to merge hunks.
+
+Therefore, on this branch:
+
+- **Do not run `npm run build`. Do not stage `dist/`.** Commit steps stage `src/`, `docs/`, `README.md`, and `CHANGELOG.md` explicitly — never `git add -A`.
+- `dist/` is knowingly left stale for the life of this branch. Tests run from `src/` via Vitest, so this does not affect verification.
+- After all three branches merge, a single integration commit runs `npm run build` and stages `dist/` alone.
+
 ## Files
 
 | File | Change |
@@ -162,12 +183,12 @@ All 143 existing tests must stay green. `.strict()` is not expected to disturb t
 | `src/index.test.ts` | Error-branch and schema-parity tests |
 | `README.md` | Document that unknown parameters are now rejected |
 | `CHANGELOG.md` | Entry for the behavior change |
-| `dist/` | Rebuilt and staged in the same commit |
+| `dist/` | **Not touched on this branch** — rebuilt once at integration |
 
 ## Risks
 
 - **`.strict()` is a behavior change on a live tool.** A call that previously succeeded while carrying a stray key now fails. This is the intent — a silently dropped key on a write tool can mean data written wrong — but it warrants a CHANGELOG entry rather than a silent ship.
-- **`dist/` must be rebuilt and staged in the same commit.** The previous branch shipped a stale `dist/` through five commits before the final review caught it.
+- **`dist/` is deliberately stale on this branch**, and the integration rebuild is the only thing that corrects it. The previous branch shipped a stale `dist/` through five commits before the final review caught it — the difference here is that staleness is intentional and has a named owner (the integration step), not an oversight. If the integration rebuild is skipped, the merged `main` ships source fixes with none of them compiled.
 
 ## Out of scope
 
