@@ -210,3 +210,53 @@ describe('editNote refuses to fabricate notes', () => {
     }
   });
 });
+
+describe('createNote normalizes a missing extension', () => {
+  it('appends .md when the caller omits it', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'Setup/Claude profiles setup', '# body');
+
+      expect(written).toBe('Setup/Claude profiles setup.md');
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup.md'))).toBe(true);
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an explicit .md extension untouched', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.md', 'x');
+      expect(written).toBe('A.md');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('is case-insensitive about an existing .MD extension', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.MD', 'x');
+      expect(written).toBe('A.MD');
+      expect(fs.existsSync(path.join(vault, 'A.MD'))).toBe(true);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('collides on the normalized path, not the caller-supplied one', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      createNote(vault, 'A.md', 'first');
+      expect(() => createNote(vault, 'A', 'second')).toThrow(/exists/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
