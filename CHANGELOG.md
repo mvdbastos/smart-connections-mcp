@@ -20,6 +20,16 @@
 - Index entries whose file is missing are dropped at startup, so `listByPrefix` and search no longer surface notes that were moved or deleted (#4).
 - `create_note` and `note_workflow action=create` now append `.md` when the caller omits it, instead of silently writing a file Obsidian's indexer never sees (#11).
 
+## sync-durability
+
+### Fixed
+- A note created and deleted within the same commit window no longer blocks every later auto-commit. Previously the unmatched pathspec aborted the whole batch and the path was never cleared, so no note auto-committed again until restart (#5).
+- Pending commits now survive an unexpected process death. The dirty set is journalled to `<vault>/.git/smart-connections-mcp/pending.json` and recovered at startup (#8).
+
+### Added
+- Paths that repeatedly fail to commit are quarantined individually rather than blocking the pipeline, and reported in the `sync` block as `quarantined_paths`.
+- `remediation` and `report` hints in the `sync` block guiding recovery from a blocked commit.
+
 ## workflow-sync
 
 ### Added
