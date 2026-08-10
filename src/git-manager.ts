@@ -132,6 +132,36 @@ export class GitManager {
   }
 
   /**
+   * Paths git can actually act on: present on disk, or tracked in the index so
+   * a deletion can be staged. A path that is neither was created and deleted
+   * before it was ever committed -- there is nothing to commit for it, and
+   * passing it to `git add` aborts the entire batch on an unmatched pathspec.
+   */
+  private committablePaths(relativePaths: string[]): string[] {
+    if (relativePaths.length === 0) {
+      return [];
+    }
+
+    let tracked = new Set<string>();
+    try {
+      const listed = this.git(['ls-files', '--', ...relativePaths]);
+      tracked = new Set(
+        listed
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+      );
+    } catch {
+      // If ls-files fails, fall back to on-disk existence alone.
+    }
+
+    return relativePaths.filter(
+      (relativePath) =>
+        tracked.has(relativePath) || fs.existsSync(path.join(this.vaultPath, relativePath))
+    );
+  }
+
+  /**
    * Commit specific files
    */
   commitSpecific(filePaths: string[], message: string, authorName?: string, authorEmail?: string): GitCommitResult {
@@ -142,8 +172,19 @@ export class GitManager {
 
     try {
       const relativePaths = filePaths.map((filePath) => this.toRelativePath(filePath));
-      this.git(['add', '--', ...relativePaths]);
-      const filesChanged = this.getStagedFiles().filter((file) => relativePaths.includes(file));
+      const committable = this.committablePaths(relativePaths);
+
+      if (committable.length === 0) {
+        return {
+          success: false,
+          filesChanged: [],
+          message,
+          error: 'No changes to commit',
+        };
+      }
+
+      this.git(['add', '--', ...committable]);
+      const filesChanged = this.getStagedFiles().filter((file) => committable.includes(file));
 
       if (filesChanged.length === 0) {
         return {
@@ -154,7 +195,7 @@ export class GitManager {
         };
       }
 
-      this.git([...this.getCommitArgs(message, authorName, authorEmail), '--only', '--', ...relativePaths]);
+      this.git([...this.getCommitArgs(message, authorName, authorEmail), '--only', '--', ...committable]);
       const commitHash = this.git(['rev-parse', '--short', 'HEAD']).trim();
 
       return {
