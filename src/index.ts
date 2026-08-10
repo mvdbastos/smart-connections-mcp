@@ -35,6 +35,8 @@ import { MEMORY_RESOURCE_BY_URI, MEMORY_RESOURCES } from './resources.js';
 import { MEMORY_PROMPT_BY_NAME, type PromptContext } from './prompts.js';
 import { SyncScheduler } from './sync-scheduler.js';
 import type { SyncStatus } from './sync-scheduler.js';
+import { SyncJournal } from './sync-journal.js';
+import { buildRemediationHint, buildReportHint } from './sync-hints.js';
 import { EditNoteSchema, NoteWorkflowSchema, formatToolError } from './tool-schemas.js';
 import type { EditOptions } from './note-writer.js';
 import type { GitCommitResult, GitSyncResult, GitStatus } from './types.js';
@@ -103,6 +105,7 @@ const syncScheduler = new SyncScheduler(
     onIdleFlush: () => {
       void usageLog?.flush();
     },
+    journal: new SyncJournal(path.join(VAULT_ROOT, '.git', 'smart-connections-mcp', 'pending.json')),
   }
 );
 
@@ -111,6 +114,14 @@ function buildSyncBlock(status: SyncStatus, deferred: boolean): Record<string, u
     ? (deferred ? 'commit_deferred' : 'commit_scheduled')
     : status.state;
 
+  const quarantined = status.quarantinedPaths.length > 0;
+  const remediation = quarantined
+    ? buildRemediationHint(VAULT_ROOT, status.lastCommitError ?? 'unknown error')
+    : undefined;
+  const report = quarantined && status.quarantineSurvivedRestart
+    ? buildReportHint(status.lastCommitError ?? 'unknown error', status.quarantinedPaths)
+    : undefined;
+
   return {
     state,
     commit_in_seconds: status.commitInSeconds,
@@ -118,6 +129,9 @@ function buildSyncBlock(status: SyncStatus, deferred: boolean): Record<string, u
     push_after_commit_seconds: Math.round(PUSH_IDLE_MS / 1000),
     ...(status.lastCommitError ? { error: status.lastCommitError } : {}),
     ...(status.pushState ? { push_state: status.pushState } : {}),
+    ...(quarantined ? { quarantined_paths: status.quarantinedPaths } : {}),
+    ...(remediation ? { remediation } : {}),
+    ...(report ? { report } : {}),
   };
 }
 
