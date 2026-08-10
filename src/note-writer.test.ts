@@ -142,3 +142,71 @@ describe('note writer', () => {
     }
   });
 });
+
+describe('editNote refuses to fabricate notes', () => {
+  it('throws for every edit mode when the file does not exist', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append')).toThrow(/not found/i);
+      expect(() => editNote(vault, 'Missing.md', 'x', 'overwrite')).toThrow(/not found/i);
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append-section', 'H')).toThrow(/not found/i);
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'replace', content: 'x', find: 'y' })
+      ).toThrow(/not found/i);
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'insert-after-heading', content: 'x', heading: 'H' })
+      ).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('names action=create in the error', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+    try {
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append')).toThrow(/action=create/);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('creates no file and no parent directory when refusing', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      expect(() => editNote(vault, 'Memory/memory/Ghost.md', 'x', 'append')).toThrow();
+
+      expect(fs.existsSync(path.join(vault, 'Memory', 'memory', 'Ghost.md'))).toBe(false);
+      expect(fs.existsSync(path.join(vault, 'Memory', 'memory'))).toBe(false);
+      expect(fs.existsSync(path.join(vault, 'Memory'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('still edits a note that exists and is empty', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      createNote(vault, 'Empty.md', '');
+      const result = editNote(vault, 'Empty.md', 'first line', 'append');
+
+      expect(result.written).toBe(true);
+      expect(fs.readFileSync(path.join(vault, 'Empty.md'), 'utf-8')).toContain('first line');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a dry run against a missing note too', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+    try {
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'append', content: 'x', dryRun: true })
+      ).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
