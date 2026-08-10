@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { EditNoteSchema, NoteWorkflowSchema, TOOL_KEYS, formatToolError } from './tool-schemas.js';
+import { tools } from './tool-definitions.js';
 
 describe('edit_note schema', () => {
   it('rejects replace mode without find and accepts valid replace', () => {
@@ -155,4 +156,26 @@ describe('formatToolError argument clarity', () => {
     expect(message).toContain('defer_hint_seconds');
     expect(message).not.toContain('did you mean');
   });
+});
+
+describe('advertised schema parity', () => {
+  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+
+  for (const toolName of ['note_workflow', 'edit_note']) {
+    it(`${toolName} advertises exactly the keys its Zod schema accepts`, () => {
+      const tool = byName.get(toolName);
+      expect(tool, `tool "${toolName}" is not registered`).toBeDefined();
+
+      const advertised = Object.keys(tool!.inputSchema.properties as Record<string, unknown>).sort();
+      const actual = [...TOOL_KEYS[toolName]].sort();
+
+      expect(advertised).toEqual(actual);
+    });
+
+    it(`${toolName} advertises additionalProperties: false`, () => {
+      const tool = byName.get(toolName);
+      expect(tool).toBeDefined();
+      expect((tool!.inputSchema as Record<string, unknown>).additionalProperties).toBe(false);
+    });
+  }
 });
