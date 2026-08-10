@@ -1,5 +1,16 @@
 # Changelog
 
+## index-filesystem-integrity
+
+### Breaking
+- `note_workflow action=edit` no longer creates a note that does not exist — this includes `mode=overwrite`. Use `action=create`. Previously a missing file was treated as empty, so the edit silently created the file and its parent directories.
+- Edits and deletes no longer resolve a bare note name by basename. `note_path` must be an exact path, a path without the `.md` suffix, or a case-insensitive match. The error lists the candidates it declined. Reads are unaffected.
+
+### Fixed
+- Deleting a note now removes it from the in-memory index, so a later edit of the same path cannot resurrect it (#7).
+- Index entries whose file is missing are dropped at startup, so `listByPrefix` and search no longer surface notes that were moved or deleted (#4).
+- `create_note` and `note_workflow action=create` now append `.md` when the caller omits it, instead of silently writing a file Obsidian's indexer never sees (#11).
+
 ## workflow-sync
 
 ### Added
