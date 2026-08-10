@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SyncScheduler } from './sync-scheduler.js';
 import type { SyncGitOps } from './sync-scheduler.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { SyncJournal } from './sync-journal.js';
 
 interface FakeGitOps extends SyncGitOps {
   commits: string[][];
@@ -288,5 +292,57 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
 
     expect(gitOps.commits).toHaveLength(0);
     expect(gitOps.pushes).toBe(0);
+  });
+});
+
+describe('SyncScheduler journal persistence', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('records dirty paths and clears them after a successful commit', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-'));
+    const file = path.join(dir, 'pending.json');
+
+    try {
+      const journal = new SyncJournal(file);
+      const scheduler = new SyncScheduler(makeGitOps(), { journal });
+
+      scheduler.markDirty('A.md');
+      expect(new SyncJournal(file).read().pending).toEqual(['A.md']);
+
+      vi.advanceTimersByTime(30_000);
+      expect(new SyncJournal(file).read().pending).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers pending paths from an interrupted session and commits them', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-'));
+    const file = path.join(dir, 'pending.json');
+
+    try {
+      const killed = new SyncScheduler(makeGitOps(), { journal: new SyncJournal(file) });
+      killed.markDirty('Survivor.md');
+      // Process dies here: no flushSync, no commit.
+
+      const gitOps = makeGitOps();
+      new SyncScheduler(gitOps, { journal: new SyncJournal(file) });
+
+      vi.advanceTimersByTime(30_000);
+      expect(gitOps.commits).toEqual([['Survivor.md']]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('works with no journal configured', () => {
+    const gitOps = makeGitOps();
+    const scheduler = new SyncScheduler(gitOps);
+
+    scheduler.markDirty('A.md');
+    vi.advanceTimersByTime(30_000);
+
+    expect(gitOps.commits).toEqual([['A.md']]);
   });
 });
