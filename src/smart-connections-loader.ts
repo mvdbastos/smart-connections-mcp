@@ -31,6 +31,9 @@ export class SmartConnectionsLoader {
 
     // Load all sources
     await this.loadSources();
+
+    // Drop entries for notes that no longer exist on disk
+    this.reconcileWithFilesystem();
   }
 
   /**
@@ -210,6 +213,53 @@ export class SmartConnectionsLoader {
     if (source && source.path) {
       this.sources.set(source.path, source);
     }
+  }
+
+  /**
+   * Remove a source from the in-memory map. The counterpart to upsertSource;
+   * without it a deleted note's key survives for the process lifetime and
+   * later resolves as if the note still existed.
+   */
+  removeSource(notePath: string): boolean {
+    return this.sources.delete(notePath);
+  }
+
+  /**
+   * Drop indexed entries with no file behind them.
+   *
+   * Two-phase on purpose: the missing set is collected first, then checked
+   * against the total before anything is deleted. If more than half the index
+   * is missing, that is a systemic fault -- a wrong vault path, an unmounted
+   * drive -- not staleness, and silently emptying the index would degrade the
+   * server to "no notes exist" with no error raised.
+   */
+  reconcileWithFilesystem(): number {
+    const missing: string[] = [];
+
+    for (const notePath of this.sources.keys()) {
+      if (!fs.existsSync(path.join(this.vaultPath, notePath))) {
+        missing.push(notePath);
+      }
+    }
+
+    if (missing.length === 0) {
+      return 0;
+    }
+
+    if (missing.length > this.sources.size / 2) {
+      console.error(
+        `Refusing to reconcile: ${missing.length} of ${this.sources.size} indexed notes are missing from ${this.vaultPath}. ` +
+          'This looks like a wrong vault path or an unavailable drive rather than stale index entries. Index left intact.'
+      );
+      return 0;
+    }
+
+    for (const notePath of missing) {
+      this.sources.delete(notePath);
+    }
+
+    console.error(`Dropped ${missing.length} stale index entries with no file on disk`);
+    return missing.length;
   }
 
   /**
