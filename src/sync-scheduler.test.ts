@@ -212,7 +212,7 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
     expect(scheduler.getStatus().state).toBe('idle');
   });
 
-  it('retries a failed commit once, then waits for the next write', () => {
+  it('retries a failed commit once, then quarantines on the second failure', () => {
     const gitOps = makeGitOps();
     let failures = 0;
     gitOps.commitPaths = (paths, message) => {
@@ -225,20 +225,23 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
     vi.advanceTimersByTime(30_000);
     expect(failures).toBe(1);
 
+    // Second batch failure triggers the per-path isolation pass, which
+    // retries A.md alone -- one more call to commitPaths.
     vi.advanceTimersByTime(30_000);
-    expect(failures).toBe(2);
+    expect(failures).toBe(3);
 
     vi.advanceTimersByTime(300_000);
-    expect(failures).toBe(2);
+    expect(failures).toBe(3);
 
     const status = scheduler.getStatus();
-    expect(status.state).toBe('commit_pending');
-    expect(status.pendingPaths).toEqual(['A.md']);
+    expect(status.state).toBe('idle');
+    expect(status.pendingPaths).toEqual([]);
+    expect(status.quarantinedPaths).toEqual(['A.md']);
     expect(status.lastCommitError).toBe('index.lock exists');
 
     scheduler.markDirty('B.md');
     vi.advanceTimersByTime(30_000);
-    expect(failures).toBe(3);
+    expect(failures).toBe(4);
   });
 
   it('treats "No changes to commit" as clean', () => {
@@ -344,5 +347,79 @@ describe('SyncScheduler journal persistence', () => {
     vi.advanceTimersByTime(30_000);
 
     expect(gitOps.commits).toEqual([['A.md']]);
+  });
+});
+
+describe('SyncScheduler quarantine', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function failingFor(badPath: string) {
+    const commits: string[][] = [];
+    const ops: SyncGitOps = {
+      commitPaths(paths, message) {
+        commits.push([...paths]);
+        if (paths.includes(badPath)) {
+          return { success: false, filesChanged: [], message, error: `cannot commit ${badPath}` };
+        }
+        return { success: true, commitHash: 'abc', filesChanged: paths, message };
+      },
+      push: () => ({ success: true, branch: 'main', localFallback: false }),
+    };
+    return { ops, commits };
+  }
+
+  it('quarantines only the failing path and commits the rest', () => {
+    const { ops } = failingFor('Bad.md');
+    const scheduler = new SyncScheduler(ops);
+
+    scheduler.markDirty('Good.md');
+    scheduler.markDirty('Bad.md');
+
+    vi.advanceTimersByTime(30_000); // first failure -> one retry scheduled
+    vi.advanceTimersByTime(30_000); // second failure -> isolation pass
+
+    const status = scheduler.getStatus();
+    expect(status.quarantinedPaths).toEqual(['Bad.md']);
+    expect(status.pendingPaths).not.toContain('Bad.md');
+  });
+
+  it('keeps committing new writes while a path is quarantined', () => {
+    const { ops, commits } = failingFor('Bad.md');
+    const scheduler = new SyncScheduler(ops);
+
+    scheduler.markDirty('Bad.md');
+    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(30_000);
+
+    commits.length = 0;
+    scheduler.markDirty('Later.md');
+    vi.advanceTimersByTime(30_000);
+
+    expect(commits).toEqual([['Later.md']]);
+  });
+
+  it('marks a quarantined path that survived a restart', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-q-'));
+    const file = path.join(dir, 'pending.json');
+
+    try {
+      const first = failingFor('Bad.md');
+      const one = new SyncScheduler(first.ops, { journal: new SyncJournal(file) });
+      one.markDirty('Bad.md');
+      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(30_000);
+      expect(one.getStatus().quarantineSurvivedRestart).toBe(false);
+
+      const second = failingFor('Bad.md');
+      const two = new SyncScheduler(second.ops, { journal: new SyncJournal(file) });
+      vi.advanceTimersByTime(30_000);
+      vi.advanceTimersByTime(30_000);
+
+      expect(two.getStatus().quarantinedPaths).toEqual(['Bad.md']);
+      expect(two.getStatus().quarantineSurvivedRestart).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

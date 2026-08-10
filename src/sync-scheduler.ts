@@ -23,6 +23,8 @@ export interface SyncStatus {
   pushInSeconds: number | null;
   lastCommitError?: string;
   pushState?: 'pushed' | 'local_fallback';
+  quarantinedPaths: string[];
+  quarantineSurvivedRestart: boolean;
 }
 
 export interface SyncSchedulerOptions {
@@ -97,6 +99,10 @@ export class SyncScheduler {
       pushInSeconds: this.pushTimer ? Math.ceil(Math.max(this.pushDeadline - now, 0) / 1000) : null,
       lastCommitError: this.lastCommitError,
       pushState: this.pushState,
+      quarantinedPaths: Array.from(this.quarantined.keys()),
+      quarantineSurvivedRestart: Array.from(this.quarantined.values()).some(
+        (entry) => entry.survivedRestart
+      ),
     };
   }
 
@@ -190,11 +196,60 @@ export class SyncScheduler {
       this.persist();
     } else {
       this.lastCommitError = result.error;
+
       if (!this.commitRetried) {
         this.commitRetried = true;
         this.scheduleCommit(this.commitIdleMs);
+      } else {
+        this.isolateAndQuarantine(paths, result.error ?? 'unknown error');
       }
+
       this.persist();
+    }
+  }
+
+  /**
+   * A batch commit failure does not say which path caused it -- commitPaths
+   * fails as a unit. Rather than blame the whole batch, retry each path alone:
+   * the ones that can commit do, and only the ones that genuinely cannot are
+   * quarantined. Bounded -- N git calls, once, on a repeated failure.
+   */
+  private isolateAndQuarantine(paths: string[], batchError: string): void {
+    let anyCommitted = false;
+
+    for (const notePath of paths) {
+      let ok = false;
+      let error = batchError;
+
+      try {
+        const single = this.gitOps.commitPaths([notePath], `Auto-commit: ${notePath}`);
+        ok = single.success || single.error === 'No changes to commit';
+        if (!ok) {
+          error = single.error ?? batchError;
+        }
+      } catch (thrown) {
+        error = thrown instanceof Error ? thrown.message : String(thrown);
+      }
+
+      this.dirtyPaths.delete(notePath);
+
+      if (ok) {
+        anyCommitted = true;
+        this.quarantined.delete(notePath);
+      } else {
+        this.quarantined.set(notePath, {
+          path: notePath,
+          error,
+          since: this.quarantined.get(notePath)?.since ?? new Date().toISOString(),
+          survivedRestart: this.previouslyQuarantined.has(notePath),
+        });
+      }
+    }
+
+    this.commitRetried = false;
+
+    if (anyCommitted) {
+      this.startPushTimer();
     }
   }
 
