@@ -148,6 +148,8 @@ Create, edit, or delete a note in a single call. Writes immediately, refreshes t
 - `dry_run` (boolean, optional): Preview the diff without writing (`edit` only)
 - `defer_hint_seconds` (number, optional, max 1800): Hold auto-commit for at least this many seconds because more writes are coming
 
+Unknown parameters are rejected rather than silently discarded. The error names the offending key, and suggests the correct one where a common alias is recognised (e.g. `new_string` → `content`, `old_string` → `find`, `file_path`/`path` → `note_path`). `edit_note` rejects unknown parameters the same way.
+
 **Search → preview → write recipe:**
 
 1. Search for the note, optionally with content inline so you don't need a follow-up read:

@@ -1,5 +1,14 @@
 # Changelog
 
+## prompt-scope-and-arg-errors
+
+### Changed
+- **Breaking:** `note_workflow` and `edit_note` now reject unknown parameters instead of silently discarding them. A call carrying a stray or misspelled key now fails with an error naming that key. Previously the key was dropped and the call proceeded, which on a write tool could mean content written in the wrong mode or to the wrong place.
+
+### Fixed
+- Argument errors no longer fabricate a "received" value for missing-field errors (#6).
+- The `migrate` prompt now names `.claude/projects/<slug>/memory/` in its opening instruction and its description, and both `init` and `migrate` now explicitly exclude `/memories/` and other assistant-level memory stores (#10).
+
 ## workflow-sync
 
 ### Added
