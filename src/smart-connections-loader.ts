@@ -128,23 +128,47 @@ export class SmartConnectionsLoader {
 
   /**
    * Resolve a caller-provided note path to the canonical indexed source path.
+   *
+   * In 'write' mode the result must have a real file behind it, and basename
+   * guessing is disabled: silently resolving "Foo" to "Archive/2019/Foo.md"
+   * is a convenience for a read and a loaded gun for an overwrite. Declined
+   * candidates are still offered as suggestions in the error.
    */
-  resolveNotePath(notePath: string): string {
+  resolveNotePath(notePath: string, mode: 'read' | 'write' = 'read'): string {
+    const exists = (candidate: string): boolean =>
+      fs.existsSync(path.join(this.vaultPath, candidate));
+
+    const accept = (candidate: string): string | null => {
+      if (mode === 'write' && !exists(candidate)) {
+        return null;
+      }
+      return candidate;
+    };
+
     if (this.sources.has(notePath)) {
-      return notePath;
+      const accepted = accept(notePath);
+      if (accepted) {
+        return accepted;
+      }
     }
 
     if (!notePath.toLowerCase().endsWith('.md')) {
       const withExtension = `${notePath}.md`;
       if (this.sources.has(withExtension)) {
-        return withExtension;
+        const accepted = accept(withExtension);
+        if (accepted) {
+          return accepted;
+        }
       }
     }
 
     const requestedLower = notePath.toLowerCase();
     for (const sourcePath of Array.from(this.sources.keys())) {
       if (sourcePath.toLowerCase() === requestedLower) {
-        return sourcePath;
+        const accepted = accept(sourcePath);
+        if (accepted) {
+          return accepted;
+        }
       }
     }
 
@@ -153,17 +177,27 @@ export class SmartConnectionsLoader {
       return path.basename(sourcePath, path.extname(sourcePath)).toLowerCase() === requestedBasename;
     });
 
-    if (basenameMatches.length === 1) {
-      return basenameMatches[0];
+    if (mode === 'read') {
+      if (basenameMatches.length === 1) {
+        return basenameMatches[0];
+      }
+
+      if (basenameMatches.length > 1) {
+        throw new Error(`Ambiguous note "${notePath}". Candidates: ${basenameMatches.slice(0, 10).join(', ')}`);
+      }
+
+      const suggestions = this.closestSourcePaths(notePath, 3);
+      const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
+      throw new Error(`Note not found: "${notePath}".${suggestionText}`);
     }
 
-    if (basenameMatches.length > 1) {
-      throw new Error(`Ambiguous note "${notePath}". Candidates: ${basenameMatches.slice(0, 10).join(', ')}`);
-    }
+    const candidates = basenameMatches.length > 0 ? basenameMatches : this.closestSourcePaths(notePath, 3);
+    const suggestionText = candidates.length > 0 ? ` Did you mean: ${candidates.slice(0, 3).join(', ')}?` : '';
 
-    const suggestions = this.closestSourcePaths(notePath, 3);
-    const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
-    throw new Error(`Note not found: "${notePath}".${suggestionText}`);
+    throw new Error(
+      `Note not found: "${notePath}".${suggestionText} ` +
+        'Pass the full path to edit an existing note, or use action=create to create a new one.'
+    );
   }
 
   private closestSourcePaths(notePath: string, limit: number): string[] {

@@ -192,3 +192,59 @@ describe('index/filesystem reconciliation', () => {
     }
   });
 });
+
+describe('write-mode path resolution', () => {
+  it('resolves a basename in read mode but refuses it in write mode', async () => {
+    const vault = createVaultWithSources(['Archive/2019/Foo.md']);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+
+      expect(loader.resolveNotePath('Foo')).toBe('Archive/2019/Foo.md');
+      expect(() => loader.resolveNotePath('Foo', 'write')).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('names the declined basename candidates in the write-mode error', async () => {
+    const vault = createVaultWithSources(['Archive/2019/Foo.md']);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+
+      expect(() => loader.resolveNotePath('Foo', 'write')).toThrow(/Archive\/2019\/Foo\.md/);
+      expect(() => loader.resolveNotePath('Foo', 'write')).toThrow(/action=create/);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts exact, .md-append and case-insensitive matches in write mode', async () => {
+    const vault = createVaultWithSources(['Notes/Alpha.md']);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+
+      expect(loader.resolveNotePath('Notes/Alpha.md', 'write')).toBe('Notes/Alpha.md');
+      expect(loader.resolveNotePath('Notes/Alpha', 'write')).toBe('Notes/Alpha.md');
+      expect(loader.resolveNotePath('notes/alpha.md', 'write')).toBe('Notes/Alpha.md');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an indexed key whose file is missing', async () => {
+    const vault = createVaultWithStaleSources(['A.md', 'B.md', 'C.md'], ['A.md', 'B.md']);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+      // Re-add the stale key to simulate drift appearing after startup.
+      loader.upsertSource(source('C.md'));
+
+      expect(() => loader.resolveNotePath('C.md', 'write')).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
