@@ -600,6 +600,7 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     listByPrefix: async (prefix: string) =>
       Array.from(loader.getSources().keys())
         .filter((notePath) => notePath.startsWith(prefix))
+        .filter((notePath) => fs.existsSync(path.join(VAULT_ROOT, notePath)))
         .sort(),
   };
 
@@ -661,9 +662,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let targetPath = params.note_path;
         if (params.action !== 'create') {
           try {
-            targetPath = loader.resolveNotePath(params.note_path);
+            targetPath = loader.resolveNotePath(params.note_path, 'write');
           } catch {
-            // Not indexed yet (e.g. brand-new file): fall back to the literal path.
+            // Not indexed, or indexed but gone from disk. Fall back to the
+            // literal path; note-writer performs the authoritative existence
+            // check and refuses rather than fabricating the file.
           }
         }
 
@@ -671,7 +674,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let wroteChanges = false;
 
         if (params.action === 'create') {
-          createNote(VAULT_ROOT, targetPath, params.content ?? '', params.frontmatter);
+          targetPath = createNote(VAULT_ROOT, targetPath, params.content ?? '', params.frontmatter);
           const embedding = await embedUpdatedNote(targetPath);
           payload = { action: 'create', note_path: targetPath, written: true, embedding };
           wroteChanges = true;
@@ -690,6 +693,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           payload = { action: 'edit', ...editResult, ...(embedding ? { embedding } : {}) };
         } else {
           deleteNote(VAULT_ROOT, targetPath);
+          loader.removeSource(targetPath);
           payload = { action: 'delete', note_path: targetPath, written: true };
           wroteChanges = true;
         }
@@ -788,10 +792,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'create_note': {
         const { note_path, content, frontmatter } = CreateNoteSchema.parse(args);
-        createNote(VAULT_ROOT, note_path, content, frontmatter);
-        const embedding = await embedUpdatedNote(note_path);
-        syncScheduler.markDirty(note_path);
-        const result = { success: true, note_path, ...embedding };
+        const writtenPath = createNote(VAULT_ROOT, note_path, content, frontmatter);
+        const embedding = await embedUpdatedNote(writtenPath);
+        syncScheduler.markDirty(writtenPath);
+        const result = { success: true, note_path: writtenPath, ...embedding };
         return {
           content: [
             {
@@ -832,6 +836,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'delete_note': {
         const { note_path } = DeleteNoteSchema.parse(args);
         deleteNote(VAULT_ROOT, note_path);
+        loader.removeSource(note_path);
         syncScheduler.markDirty(note_path);
         const result = { success: true, note_path };
         return {
