@@ -154,15 +154,18 @@ export function createNote(
   notePath: string,
   body: string,
   frontmatter?: Record<string, unknown>
-): void {
-  const file = safe(vault, notePath);
+): string {
+  const normalizedPath = notePath.toLowerCase().endsWith('.md') ? notePath : `${notePath}.md`;
+  const file = safe(vault, normalizedPath);
 
   if (fs.existsSync(file)) {
-    throw new Error(`Note already exists: ${notePath}`);
+    throw new Error(`Note already exists: ${normalizedPath}`);
   }
 
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${frontmatterYaml(frontmatter)}${body}`, 'utf-8');
+
+  return normalizedPath;
 }
 
 export function editNote(
@@ -188,7 +191,12 @@ export function editNote(
     ? { content: contentOrOptions, mode: mode ?? 'append', heading }
     : contentOrOptions;
   const file = safe(vault, notePath);
-  const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+
+  if (!fs.existsSync(file)) {
+    throw new Error(`Note not found: "${notePath}". Use action=create to create it.`);
+  }
+
+  const current = fs.readFileSync(file, 'utf-8');
   const content = options.content ?? '';
   let next: string;
 
@@ -227,7 +235,6 @@ export function editNote(
     return result;
   }
 
-  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, next, 'utf-8');
 
   result.written = true;
@@ -239,5 +246,11 @@ export function editNote(
 }
 
 export function deleteNote(vault: string, notePath: string): void {
-  fs.rmSync(safe(vault, notePath));
+  const file = safe(vault, notePath);
+
+  if (!fs.existsSync(file)) {
+    throw new Error(`Note not found: "${notePath}". Nothing to delete.`);
+  }
+
+  fs.rmSync(file);
 }
