@@ -358,7 +358,7 @@ import { z, ZodError, ZodIssueCode } from 'zod';
 
 const editNoteShape = {
   note_path: z.string().describe('Path to the note, relative to the vault'),
-  content: z.string().describe('Markdown content to write, append, insert, or use as replacement'),
+  content: z.string().describe('Replacement text in replace mode; the note body or fragment to write in every other mode'),
   mode: z
     .enum(['overwrite', 'append', 'append-section', 'replace', 'insert-after-heading'])
     .default('append')
@@ -394,7 +394,12 @@ export const EditNoteSchema = z
 const noteWorkflowShape = {
   action: z.enum(['create', 'edit', 'delete']).describe('Workflow action'),
   note_path: z.string().describe('Path to the note, relative to the vault'),
-  content: z.string().optional().describe('Markdown content; required for create and edit'),
+  content: z
+    .string()
+    .optional()
+    .describe(
+      'Note content; required for create and edit. In edit mode=replace, the replacement text; otherwise the body or fragment to write'
+    ),
   frontmatter: z.record(z.unknown()).optional().describe('Optional frontmatter fields (create only)'),
   mode: z
     .enum(['overwrite', 'append', 'append-section', 'replace', 'insert-after-heading'])
@@ -532,6 +537,13 @@ being restated, both schemas are strict, and formatToolError branches on
 issue code. An alias table maps the Claude Code Edit/Write parameter
 names callers reach for out of habit, but only suggests a target that is
 actually valid for the failing tool.
+
+A recurrence report on #6 confirmed naming the offending key is enough on
+its own to recover, and separately suggested the content field's
+description buries its replace-mode role fourth in a list of four --
+which is why an agent primed on Edit's old_string/new_string reached for
+new_string instead. Reworded both content descriptions to lead with the
+mode-dependent role instead.
 
 Closes #6
 
