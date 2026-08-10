@@ -19,6 +19,13 @@ function removeTempDir(dir) {
         }
     }
 }
+function makeRepo() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-pathspec-'));
+    execSync('git init', { cwd: dir, stdio: 'pipe' });
+    execSync('git config user.email "test@example.com"', { cwd: dir, stdio: 'pipe' });
+    execSync('git config user.name "Test User"', { cwd: dir, stdio: 'pipe' });
+    return dir;
+}
 describe('GitManager', () => {
     beforeAll(() => {
         TEST_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'smart-connections-git-'));
@@ -310,6 +317,47 @@ describe('GitManager', () => {
         finally {
             removeTempDir(fakeGitDir);
             removeTempDir(fakeRepoDir);
+        }
+    });
+});
+describe('commitSpecific pathspec filtering', () => {
+    it('commits real paths and ignores one that was never committed and no longer exists', () => {
+        const repo = makeRepo();
+        try {
+            fs.writeFileSync(path.join(repo, 'Real.md'), '# real');
+            const result = new GitManager(repo).commitSpecific([path.join(repo, 'Real.md'), path.join(repo, 'Ghost.md')], 'Auto-commit: Real.md, Ghost.md');
+            expect(result.success).toBe(true);
+            expect(result.filesChanged).toContain('Real.md');
+            expect(result.filesChanged).not.toContain('Ghost.md');
+        }
+        finally {
+            fs.rmSync(repo, { recursive: true, force: true });
+        }
+    });
+    it('reports no changes when every path is a phantom', () => {
+        const repo = makeRepo();
+        try {
+            const result = new GitManager(repo).commitSpecific([path.join(repo, 'Ghost.md')], 'Auto-commit: Ghost.md');
+            expect(result.success).toBe(false);
+            expect(result.error).toBe('No changes to commit');
+        }
+        finally {
+            fs.rmSync(repo, { recursive: true, force: true });
+        }
+    });
+    it('stages the deletion of a tracked file that was removed', () => {
+        const repo = makeRepo();
+        try {
+            fs.writeFileSync(path.join(repo, 'Tracked.md'), '# t');
+            const git = new GitManager(repo);
+            git.commitSpecific([path.join(repo, 'Tracked.md')], 'add');
+            fs.rmSync(path.join(repo, 'Tracked.md'));
+            const result = git.commitSpecific([path.join(repo, 'Tracked.md')], 'remove');
+            expect(result.success).toBe(true);
+            expect(result.filesChanged).toContain('Tracked.md');
+        }
+        finally {
+            fs.rmSync(repo, { recursive: true, force: true });
         }
     });
 });

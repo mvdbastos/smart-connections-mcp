@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { MEMORY_PROMPTS, MEMORY_PROMPT_BY_NAME } from './prompts';
 describe('prompts', () => {
+    const testArgs = {
+        capture_memory: { topic: 'test' },
+        project_research: { topic: 'test' },
+        cleanup_stale: { query: 'test' },
+        daily_note: {},
+        review_before_write: { note_path: 'test.md' },
+        disable: {},
+        init: {},
+        migrate: {},
+    };
+    const emptyContext = { search: async () => [] };
     it('should have 8 prompts', () => {
         expect(MEMORY_PROMPTS).toHaveLength(8);
     });
@@ -32,21 +43,9 @@ describe('prompts', () => {
         });
     });
     it('all prompts should mention note_workflow in their content', async () => {
-        const mockSearch = async () => [];
-        const context = { search: mockSearch };
-        const testArgs = {
-            capture_memory: { topic: 'test' },
-            project_research: { topic: 'test' },
-            cleanup_stale: { query: 'test' },
-            daily_note: {},
-            review_before_write: { note_path: 'test.md' },
-            disable: {},
-            init: {},
-            migrate: {},
-        };
         for (const prompt of MEMORY_PROMPTS) {
             const args = testArgs[prompt.name] || {};
-            const text = await prompt.build(args, context);
+            const text = await prompt.build(args, emptyContext);
             expect(text).toMatch(/note_workflow/i);
         }
     });
@@ -461,6 +460,29 @@ describe('prompts', () => {
             expect(text).toMatch(/0\.75|0\.76/);
             expect(text).toMatch(/0\.42/);
         });
+    });
+    const NATIVE_MEMORY_PATH_LITERAL = '.claude/projects/<slug>/memory/';
+    it('every prompt that mentions native memory names the exact path', async () => {
+        for (const prompt of MEMORY_PROMPTS) {
+            const text = await prompt.build(testArgs[prompt.name] ?? {}, emptyContext);
+            if (/native memory/i.test(text)) {
+                expect(text, `prompt "${prompt.name}" mentions native memory without naming ${NATIVE_MEMORY_PATH_LITERAL}`).toContain(NATIVE_MEMORY_PATH_LITERAL);
+            }
+        }
+    });
+    it('init and migrate both carry the scope guard', async () => {
+        for (const name of ['init', 'migrate']) {
+            const prompt = MEMORY_PROMPT_BY_NAME.get(name);
+            expect(prompt, `prompt "${name}" is missing`).toBeDefined();
+            const text = await prompt.build(testArgs[name] ?? {}, emptyContext);
+            expect(text, `prompt "${name}" is missing the scope guard`).toContain('**Scope is exact.**');
+            expect(text).toContain('/memories/');
+        }
+    });
+    it('migrate description names the native memory path', () => {
+        const migrate = MEMORY_PROMPT_BY_NAME.get('migrate');
+        expect(migrate).toBeDefined();
+        expect(migrate.description).toContain(NATIVE_MEMORY_PATH_LITERAL);
     });
 });
 //# sourceMappingURL=prompts.test.js.map

@@ -24,6 +24,8 @@ export class SmartConnectionsLoader {
         await this.loadConfig();
         // Load all sources
         await this.loadSources();
+        // Drop entries for notes that no longer exist on disk
+        this.reconcileWithFilesystem();
     }
     /**
      * Load smart_env.json configuration
@@ -106,36 +108,63 @@ export class SmartConnectionsLoader {
     }
     /**
      * Resolve a caller-provided note path to the canonical indexed source path.
+     *
+     * In 'write' mode the result must have a real file behind it, and basename
+     * guessing is disabled: silently resolving "Foo" to "Archive/2019/Foo.md"
+     * is a convenience for a read and a loaded gun for an overwrite. Declined
+     * candidates are still offered as suggestions in the error.
      */
-    resolveNotePath(notePath) {
+    resolveNotePath(notePath, mode = 'read') {
+        const exists = (candidate) => fs.existsSync(path.join(this.vaultPath, candidate));
+        const accept = (candidate) => {
+            if (mode === 'write' && !exists(candidate)) {
+                return null;
+            }
+            return candidate;
+        };
         if (this.sources.has(notePath)) {
-            return notePath;
+            const accepted = accept(notePath);
+            if (accepted) {
+                return accepted;
+            }
         }
         if (!notePath.toLowerCase().endsWith('.md')) {
             const withExtension = `${notePath}.md`;
             if (this.sources.has(withExtension)) {
-                return withExtension;
+                const accepted = accept(withExtension);
+                if (accepted) {
+                    return accepted;
+                }
             }
         }
         const requestedLower = notePath.toLowerCase();
         for (const sourcePath of Array.from(this.sources.keys())) {
             if (sourcePath.toLowerCase() === requestedLower) {
-                return sourcePath;
+                const accepted = accept(sourcePath);
+                if (accepted) {
+                    return accepted;
+                }
             }
         }
         const requestedBasename = path.basename(notePath, path.extname(notePath)).toLowerCase();
         const basenameMatches = Array.from(this.sources.keys()).filter((sourcePath) => {
             return path.basename(sourcePath, path.extname(sourcePath)).toLowerCase() === requestedBasename;
         });
-        if (basenameMatches.length === 1) {
-            return basenameMatches[0];
+        if (mode === 'read') {
+            if (basenameMatches.length === 1) {
+                return basenameMatches[0];
+            }
+            if (basenameMatches.length > 1) {
+                throw new Error(`Ambiguous note "${notePath}". Candidates: ${basenameMatches.slice(0, 10).join(', ')}`);
+            }
+            const suggestions = this.closestSourcePaths(notePath, 3);
+            const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
+            throw new Error(`Note not found: "${notePath}".${suggestionText}`);
         }
-        if (basenameMatches.length > 1) {
-            throw new Error(`Ambiguous note "${notePath}". Candidates: ${basenameMatches.slice(0, 10).join(', ')}`);
-        }
-        const suggestions = this.closestSourcePaths(notePath, 3);
-        const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(', ')}?` : '';
-        throw new Error(`Note not found: "${notePath}".${suggestionText}`);
+        const candidates = basenameMatches.length > 0 ? basenameMatches : this.closestSourcePaths(notePath, 3);
+        const suggestionText = candidates.length > 0 ? ` Did you mean: ${candidates.slice(0, 3).join(', ')}?` : '';
+        throw new Error(`Note not found: "${notePath}".${suggestionText} ` +
+            'Pass the full path to edit an existing note, or use action=create to create a new one.');
     }
     closestSourcePaths(notePath, limit) {
         const normalizedInput = notePath.toLowerCase();
@@ -173,6 +202,44 @@ export class SmartConnectionsLoader {
         if (source && source.path) {
             this.sources.set(source.path, source);
         }
+    }
+    /**
+     * Remove a source from the in-memory map. The counterpart to upsertSource;
+     * without it a deleted note's key survives for the process lifetime and
+     * later resolves as if the note still existed.
+     */
+    removeSource(notePath) {
+        return this.sources.delete(notePath);
+    }
+    /**
+     * Drop indexed entries with no file behind them.
+     *
+     * Two-phase on purpose: the missing set is collected first, then checked
+     * against the total before anything is deleted. If more than half the index
+     * is missing, that is a systemic fault -- a wrong vault path, an unmounted
+     * drive -- not staleness, and silently emptying the index would degrade the
+     * server to "no notes exist" with no error raised.
+     */
+    reconcileWithFilesystem() {
+        const missing = [];
+        for (const notePath of this.sources.keys()) {
+            if (!fs.existsSync(path.join(this.vaultPath, notePath))) {
+                missing.push(notePath);
+            }
+        }
+        if (missing.length === 0) {
+            return 0;
+        }
+        if (missing.length > this.sources.size / 2) {
+            console.error(`Refusing to reconcile: ${missing.length} of ${this.sources.size} indexed notes are missing from ${this.vaultPath}. ` +
+                'This looks like a wrong vault path or an unavailable drive rather than stale index entries. Index left intact.');
+            return 0;
+        }
+        for (const notePath of missing) {
+            this.sources.delete(notePath);
+        }
+        console.error(`Dropped ${missing.length} stale index entries with no file on disk`);
+        return missing.length;
     }
     /**
      * Get configuration

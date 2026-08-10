@@ -142,3 +142,121 @@ describe('note writer', () => {
     }
   });
 });
+
+describe('editNote refuses to fabricate notes', () => {
+  it('throws for every edit mode when the file does not exist', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append')).toThrow(/not found/i);
+      expect(() => editNote(vault, 'Missing.md', 'x', 'overwrite')).toThrow(/not found/i);
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append-section', 'H')).toThrow(/not found/i);
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'replace', content: 'x', find: 'y' })
+      ).toThrow(/not found/i);
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'insert-after-heading', content: 'x', heading: 'H' })
+      ).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('names action=create in the error', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+    try {
+      expect(() => editNote(vault, 'Missing.md', 'x', 'append')).toThrow(/action=create/);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('creates no file and no parent directory when refusing', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      expect(() => editNote(vault, 'Memory/memory/Ghost.md', 'x', 'append')).toThrow();
+
+      expect(fs.existsSync(path.join(vault, 'Memory', 'memory', 'Ghost.md'))).toBe(false);
+      expect(fs.existsSync(path.join(vault, 'Memory', 'memory'))).toBe(false);
+      expect(fs.existsSync(path.join(vault, 'Memory'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('still edits a note that exists and is empty', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      createNote(vault, 'Empty.md', '');
+      const result = editNote(vault, 'Empty.md', 'first line', 'append');
+
+      expect(result.written).toBe(true);
+      expect(fs.readFileSync(path.join(vault, 'Empty.md'), 'utf-8')).toContain('first line');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a dry run against a missing note too', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+    try {
+      expect(() =>
+        editNote(vault, 'Missing.md', { mode: 'append', content: 'x', dryRun: true })
+      ).toThrow(/not found/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('createNote normalizes a missing extension', () => {
+  it('appends .md when the caller omits it', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'Setup/Claude profiles setup', '# body');
+
+      expect(written).toBe('Setup/Claude profiles setup.md');
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup.md'))).toBe(true);
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an explicit .md extension untouched', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.md', 'x');
+      expect(written).toBe('A.md');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('is case-insensitive about an existing .MD extension', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.MD', 'x');
+      expect(written).toBe('A.MD');
+      expect(fs.existsSync(path.join(vault, 'A.MD'))).toBe(true);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('collides on the normalized path, not the caller-supplied one', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      createNote(vault, 'A.md', 'first');
+      expect(() => createNote(vault, 'A', 'second')).toThrow(/exists/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});

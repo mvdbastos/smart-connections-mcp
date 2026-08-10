@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SyncScheduler } from './sync-scheduler.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { SyncJournal } from './sync-journal.js';
 function makeGitOps() {
     const fake = {
         commits: [],
@@ -158,7 +162,7 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
         expect(gitOps.pushes).toBe(0);
         expect(scheduler.getStatus().state).toBe('idle');
     });
-    it('retries a failed commit once, then waits for the next write', () => {
+    it('retries a failed commit once, then quarantines on the second failure', () => {
         const gitOps = makeGitOps();
         let failures = 0;
         gitOps.commitPaths = (paths, message) => {
@@ -169,17 +173,20 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
         scheduler.markDirty('A.md');
         vi.advanceTimersByTime(30_000);
         expect(failures).toBe(1);
+        // Second batch failure triggers the per-path isolation pass, which
+        // retries A.md alone -- one more call to commitPaths.
         vi.advanceTimersByTime(30_000);
-        expect(failures).toBe(2);
+        expect(failures).toBe(3);
         vi.advanceTimersByTime(300_000);
-        expect(failures).toBe(2);
+        expect(failures).toBe(3);
         const status = scheduler.getStatus();
-        expect(status.state).toBe('commit_pending');
-        expect(status.pendingPaths).toEqual(['A.md']);
+        expect(status.state).toBe('idle');
+        expect(status.pendingPaths).toEqual([]);
+        expect(status.quarantinedPaths).toEqual(['A.md']);
         expect(status.lastCommitError).toBe('index.lock exists');
         scheduler.markDirty('B.md');
         vi.advanceTimersByTime(30_000);
-        expect(failures).toBe(3);
+        expect(failures).toBe(4);
     });
     it('treats "No changes to commit" as clean', () => {
         const gitOps = makeGitOps();
@@ -221,6 +228,109 @@ describe('SyncScheduler defer hints, manual flush, failures, shutdown', () => {
         scheduler.flushSync();
         expect(gitOps.commits).toHaveLength(0);
         expect(gitOps.pushes).toBe(0);
+    });
+});
+describe('SyncScheduler journal persistence', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    it('records dirty paths and clears them after a successful commit', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-'));
+        const file = path.join(dir, 'pending.json');
+        try {
+            const journal = new SyncJournal(file);
+            const scheduler = new SyncScheduler(makeGitOps(), { journal });
+            scheduler.markDirty('A.md');
+            expect(new SyncJournal(file).read().pending).toEqual(['A.md']);
+            vi.advanceTimersByTime(30_000);
+            expect(new SyncJournal(file).read().pending).toEqual([]);
+        }
+        finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+    it('recovers pending paths from an interrupted session and commits them', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-'));
+        const file = path.join(dir, 'pending.json');
+        try {
+            const killed = new SyncScheduler(makeGitOps(), { journal: new SyncJournal(file) });
+            killed.markDirty('Survivor.md');
+            // Process dies here: no flushSync, no commit.
+            const gitOps = makeGitOps();
+            new SyncScheduler(gitOps, { journal: new SyncJournal(file) });
+            vi.advanceTimersByTime(30_000);
+            expect(gitOps.commits).toEqual([['Survivor.md']]);
+        }
+        finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    });
+    it('works with no journal configured', () => {
+        const gitOps = makeGitOps();
+        const scheduler = new SyncScheduler(gitOps);
+        scheduler.markDirty('A.md');
+        vi.advanceTimersByTime(30_000);
+        expect(gitOps.commits).toEqual([['A.md']]);
+    });
+});
+describe('SyncScheduler quarantine', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    function failingFor(badPath) {
+        const commits = [];
+        const ops = {
+            commitPaths(paths, message) {
+                commits.push([...paths]);
+                if (paths.includes(badPath)) {
+                    return { success: false, filesChanged: [], message, error: `cannot commit ${badPath}` };
+                }
+                return { success: true, commitHash: 'abc', filesChanged: paths, message };
+            },
+            push: () => ({ success: true, branch: 'main', localFallback: false }),
+        };
+        return { ops, commits };
+    }
+    it('quarantines only the failing path and commits the rest', () => {
+        const { ops } = failingFor('Bad.md');
+        const scheduler = new SyncScheduler(ops);
+        scheduler.markDirty('Good.md');
+        scheduler.markDirty('Bad.md');
+        vi.advanceTimersByTime(30_000); // first failure -> one retry scheduled
+        vi.advanceTimersByTime(30_000); // second failure -> isolation pass
+        const status = scheduler.getStatus();
+        expect(status.quarantinedPaths).toEqual(['Bad.md']);
+        expect(status.pendingPaths).not.toContain('Bad.md');
+    });
+    it('keeps committing new writes while a path is quarantined', () => {
+        const { ops, commits } = failingFor('Bad.md');
+        const scheduler = new SyncScheduler(ops);
+        scheduler.markDirty('Bad.md');
+        vi.advanceTimersByTime(30_000);
+        vi.advanceTimersByTime(30_000);
+        commits.length = 0;
+        scheduler.markDirty('Later.md');
+        vi.advanceTimersByTime(30_000);
+        expect(commits).toEqual([['Later.md']]);
+    });
+    it('marks a quarantined path that survived a restart', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-q-'));
+        const file = path.join(dir, 'pending.json');
+        try {
+            const first = failingFor('Bad.md');
+            const one = new SyncScheduler(first.ops, { journal: new SyncJournal(file) });
+            one.markDirty('Bad.md');
+            vi.advanceTimersByTime(30_000);
+            vi.advanceTimersByTime(30_000);
+            expect(one.getStatus().quarantineSurvivedRestart).toBe(false);
+            const second = failingFor('Bad.md');
+            const two = new SyncScheduler(second.ops, { journal: new SyncJournal(file) });
+            vi.advanceTimersByTime(30_000);
+            vi.advanceTimersByTime(30_000);
+            expect(two.getStatus().quarantinedPaths).toEqual(['Bad.md']);
+            expect(two.getStatus().quarantineSurvivedRestart).toBe(true);
+        }
+        finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 });
 //# sourceMappingURL=sync-scheduler.test.js.map

@@ -1,5 +1,35 @@
 # Changelog
 
+## prompt-scope-and-arg-errors
+
+### Changed
+- **Breaking:** `note_workflow` and `edit_note` now reject unknown parameters instead of silently discarding them. A call carrying a stray or misspelled key now fails with an error naming that key. Previously the key was dropped and the call proceeded, which on a write tool could mean content written in the wrong mode or to the wrong place.
+
+### Fixed
+- Argument errors no longer fabricate a "received" value for missing-field errors (#6).
+- The `migrate` prompt now names `.claude/projects/<slug>/memory/` in its opening instruction and its description, and both `init` and `migrate` now explicitly exclude `/memories/` and other assistant-level memory stores (#10).
+
+## index-filesystem-integrity
+
+### Breaking
+- `note_workflow action=edit` no longer creates a note that does not exist — this includes `mode=overwrite`. Use `action=create`. Previously a missing file was treated as empty, so the edit silently created the file and its parent directories.
+- Edits and deletes no longer resolve a bare note name by basename. `note_path` must be an exact path, a path without the `.md` suffix, or a case-insensitive match. The error lists the candidates it declined. Reads are unaffected.
+
+### Fixed
+- Deleting a note now removes it from the in-memory index, so a later edit of the same path cannot resurrect it (#7).
+- Index entries whose file is missing are dropped at startup, so `listByPrefix` and search no longer surface notes that were moved or deleted (#4).
+- `create_note` and `note_workflow action=create` now append `.md` when the caller omits it, instead of silently writing a file Obsidian's indexer never sees (#11).
+
+## sync-durability
+
+### Fixed
+- A note created and deleted within the same commit window no longer blocks every later auto-commit. Previously the unmatched pathspec aborted the whole batch and the path was never cleared, so no note auto-committed again until restart (#5).
+- Pending commits now survive an unexpected process death. The dirty set is journalled to `<vault>/.git/smart-connections-mcp/pending.json` and recovered at startup (#8).
+
+### Added
+- Paths that repeatedly fail to commit are quarantined individually rather than blocking the pipeline, and reported in the `sync` block as `quarantined_paths`.
+- `remediation` and `report` hints in the `sync` block guiding recovery from a blocked commit.
+
 ## workflow-sync
 
 ### Added

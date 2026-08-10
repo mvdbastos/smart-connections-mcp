@@ -6,9 +6,10 @@ export interface PromptContext {
     search: (query: string, limit: number, threshold: number) => Promise<SearchResult[]>;
     /**
      * Optional. Lists vault-relative note paths beginning with `prefix`.
-     * Backed by the loader's indexed sources, so freshly written notes may
-     * lag until reindex — treat results as a display hint, never as an
-     * authoritative migration check.
+     * Every returned path is verified to exist on disk, so results no longer
+     * include notes that were moved or deleted. Freshly written notes may
+     * still lag until reindex, so the listing can be incomplete — and
+     * `metadata.vault_note` remains the only authoritative migration check.
      */
     listByPrefix?: (prefix: string) => Promise<string[]>;
 }
