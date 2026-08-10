@@ -621,7 +621,163 @@ EOF
 
 ---
 
-### Task 4: Wire write mode, source removal, and prefix filtering
+### Task 4: `createNote` normalizes a missing `.md` extension
+
+**Files:**
+- Modify: `src/note-writer.ts`
+- Test: `src/note-writer.test.ts`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `createNote` return type changes from `void` to `string` (the normalized path actually written). Existing callers that discard the return value are unaffected. Task 5 captures it.
+
+**Why this task exists.** Filed as issue #11 after this plan's first three tasks were written: `create_note` with `note_path: "Setup/Claude profiles setup"` (no extension) reported `success: true` and wrote a file Obsidian's indexer never sees, because Obsidian only indexes `.md` files. A later edit at the `.md` path then created a second, divergent file rather than touching the first — the same "was this ever indexed" gap Tasks 1-3 close for edit and delete, now closed for create. The reporter's own ranked recommendation is followed: normalize rather than reject, since every caller writing `Folder/Note` means `Folder/Note.md` and there is no legitimate use for a non-`.md` file created through this API.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `src/note-writer.test.ts`:
+
+```ts
+describe('createNote normalizes a missing extension', () => {
+  it('appends .md when the caller omits it', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'Setup/Claude profiles setup', '# body');
+
+      expect(written).toBe('Setup/Claude profiles setup.md');
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup.md'))).toBe(true);
+      expect(fs.existsSync(path.join(vault, 'Setup', 'Claude profiles setup'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an explicit .md extension untouched', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.md', 'x');
+      expect(written).toBe('A.md');
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('is case-insensitive about an existing .MD extension', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      const written = createNote(vault, 'A.MD', 'x');
+      expect(written).toBe('A.MD');
+      expect(fs.existsSync(path.join(vault, 'A.MD'))).toBe(true);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('collides on the normalized path, not the caller-supplied one', () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'w-'));
+
+    try {
+      createNote(vault, 'A.md', 'first');
+      expect(() => createNote(vault, 'A', 'second')).toThrow(/exists/i);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npx vitest run src/note-writer.test.ts`
+Expected: FAIL — `createNote` writes the literal path today, so the first case leaves an extensionless file on disk and returns `undefined`.
+
+- [ ] **Step 3: Normalize in `createNote`**
+
+In `src/note-writer.ts`, replace the function (currently lines 152-166):
+
+```ts
+export function createNote(
+  vault: string,
+  notePath: string,
+  body: string,
+  frontmatter?: Record<string, unknown>
+): void {
+  const file = safe(vault, notePath);
+
+  if (fs.existsSync(file)) {
+    throw new Error(`Note already exists: ${notePath}`);
+  }
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${frontmatterYaml(frontmatter)}${body}`, 'utf-8');
+}
+```
+
+with:
+
+```ts
+export function createNote(
+  vault: string,
+  notePath: string,
+  body: string,
+  frontmatter?: Record<string, unknown>
+): string {
+  const normalizedPath = notePath.toLowerCase().endsWith('.md') ? notePath : `${notePath}.md`;
+  const file = safe(vault, normalizedPath);
+
+  if (fs.existsSync(file)) {
+    throw new Error(`Note already exists: ${normalizedPath}`);
+  }
+
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${frontmatterYaml(frontmatter)}${body}`, 'utf-8');
+
+  return normalizedPath;
+}
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `npx vitest run src/note-writer.test.ts`
+Expected: PASS, including the pre-existing `'creates, edits, and deletes a note'` and `'refuses to create over an existing note or escape the vault'` tests — both already pass `.md`-suffixed paths, so normalization is a no-op for them.
+
+- [ ] **Step 5: Run the full suite**
+
+Run: `npx vitest run`
+Expected: FAIL only in `src/index.test.ts`, if at all — `createNote`'s two call sites in `src/index.ts` (lines 674 and 791) still discard the return value at this point, which is fine (`void` vs `string` discard is not a type error), but any test asserting on a `note_path` in the create response for an extensionless input will fail until Task 5 wires the return value through. This is expected; Task 5 closes it.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/note-writer.ts src/note-writer.test.ts
+git commit -F - <<'EOF'
+fix: createNote appends .md when the caller omits it
+
+create_note accepted a note_path with no extension, reported success,
+and wrote a file Obsidian's indexer never sees -- Obsidian only indexes
+.md files. A later edit at the correct .md path then created a second,
+divergent file instead of updating the first, and in the reported case
+the orphaned file held superseded content that documented an incorrect
+procedure the corrected note exists to warn against.
+
+Normalizing is the reporter's own top-ranked fix: every caller writing
+Folder/Note means Folder/Note.md, and there is no legitimate use for a
+non-.md file created through this API. createNote now returns the
+normalized path so callers can report what was actually written.
+
+Closes #11
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01K4mPAWNTYd7DgX5zMuGLe6
+EOF
+```
+
+---
+
+### Task 5: Wire write mode, source removal, prefix filtering, and the normalized create path
 
 **Files:**
 - Modify: `src/index.ts`
@@ -629,7 +785,7 @@ EOF
 - Test: `src/index.test.ts`
 
 **Interfaces:**
-- Consumes: `resolveNotePath(path, 'write')` from Task 2, `removeSource` from Task 1, the `editNote` guard from Task 3.
+- Consumes: `resolveNotePath(path, 'write')` from Task 2, `removeSource` from Task 1, the `editNote` guard from Task 3, `createNote`'s string return from Task 4.
 - Produces: nothing consumed by later tasks.
 
 - [ ] **Step 1: Write the failing reproduction test**
@@ -695,6 +851,68 @@ import { SmartConnectionsLoader } from './smart-connections-loader.js';
 Run: `npx vitest run src/index.test.ts`
 Expected: FAIL — `removeSource` and the two-argument `resolveNotePath` are used here, so this passes only once Tasks 1-3 are merged. If Tasks 1-3 are already committed on this branch, this test should **pass** at this step; that is expected and fine. Confirm it passes, then continue — the remaining steps wire the same behavior into the live handler.
 
+- [ ] **Step 2b: Write the #7 recurrence regression test**
+
+The reported recurrence (issue #7, comment dated 2026-08-07) is narrower and easier to hit than the original write-up: the caller passes the **correct, on-disk, currently-valid literal path** — nothing stale is handed to them — but that exact path had not yet been reindexed, while a stale entry with the **same basename in a different folder** was still indexed. `resolveNotePath` preferred the stale basename match over the correct literal path, and `editNote` then fabricated a new file at the stale location instead of touching the real one.
+
+Append to `src/index.test.ts`, in the same `describe('delete then edit does not resurrect a note', ...)` block added in Step 1 (or directly after it):
+
+```ts
+describe('a literal correct path wins over a stale basename match', () => {
+  it('edits the real un-indexed file rather than the stale indexed one', async () => {
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'basename-race-'));
+    fs.mkdirSync(path.join(vault, '.smart-env', 'multi'), { recursive: true });
+    fs.writeFileSync(
+      path.join(vault, '.smart-env', 'smart_env.json'),
+      JSON.stringify({
+        smart_sources: { embed_model: { adapter: 'transformers', transformers: { model_key: 'model' } } },
+      })
+    );
+    fs.writeFileSync(path.join(vault, '.smart-env', 'multi', 'sources.ajson'), '\n');
+
+    try {
+      // The real note, at its correct current path, not yet reindexed.
+      createNote(vault, 'Memory/Honcho Memory Stack.md', '# real content');
+
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+      // A stale index entry sharing the same basename, at a wrong path with no file behind it.
+      loader.upsertSource({
+        path: 'Memory/memory/Honcho Memory Stack.md',
+        embeddings: { model: { vec: [1, 0], last_embed: { hash: 'h', tokens: 1 } } },
+        last_read: { hash: 'h', at: 0 },
+        class_name: 'SmartSource',
+        last_import: { mtime: 0, size: 0, at: 0, hash: 'h' },
+        blocks: {},
+      });
+
+      // Same sequence the note_workflow handler uses: try write-mode resolution,
+      // fall back to the literal path on failure, let note-writer's own
+      // existence check be authoritative.
+      let targetPath = 'Memory/Honcho Memory Stack.md';
+      try {
+        targetPath = loader.resolveNotePath('Memory/Honcho Memory Stack.md', 'write');
+      } catch {
+        // Falls through to the literal path — expected, since the exact
+        // path is not indexed yet.
+      }
+
+      const result = editNote(vault, targetPath, 'appended', 'append');
+
+      expect(result.written).toBe(true);
+      expect(fs.readFileSync(path.join(vault, 'Memory', 'Honcho Memory Stack.md'), 'utf-8')).toContain(
+        'appended'
+      );
+      expect(fs.existsSync(path.join(vault, 'Memory', 'memory', 'Honcho Memory Stack.md'))).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+});
+```
+
+This passes once Task 2's write-mode resolution (which disables basename fallback for writes) is in place — confirm it does before continuing.
+
 - [ ] **Step 3: Pass write mode in the handler**
 
 In `src/index.ts`, in the `note_workflow` case, replace (currently lines 660-667):
@@ -751,6 +969,54 @@ with:
 - [ ] **Step 5: Do the same for the deprecated `delete_note` tool**
 
 In `src/index.ts`, find the `case 'delete_note':` handler (around line 832) and add the same `loader.removeSource(note_path);` call immediately after its `deleteNote(VAULT_ROOT, note_path);` line, before `syncScheduler.markDirty(note_path);`.
+
+- [ ] **Step 5b: Use the normalized path from `createNote`**
+
+`createNote` now returns the path it actually wrote (Task 4), which may differ from the caller's input when the extension was missing. Two call sites need to pick it up.
+
+In `src/index.ts`, in the `note_workflow` case, replace (currently lines 673-677):
+
+```ts
+        if (params.action === 'create') {
+          createNote(VAULT_ROOT, targetPath, params.content ?? '', params.frontmatter);
+          const embedding = await embedUpdatedNote(targetPath);
+          payload = { action: 'create', note_path: targetPath, written: true, embedding };
+          wroteChanges = true;
+```
+
+with:
+
+```ts
+        if (params.action === 'create') {
+          targetPath = createNote(VAULT_ROOT, targetPath, params.content ?? '', params.frontmatter);
+          const embedding = await embedUpdatedNote(targetPath);
+          payload = { action: 'create', note_path: targetPath, written: true, embedding };
+          wroteChanges = true;
+```
+
+`targetPath` is declared with `let` two blocks up, so reassigning it here means the `markDirty(targetPath, ...)` call after this switch already uses the normalized path with no further change.
+
+In the same file, in the deprecated `case 'create_note':` handler, replace (currently lines 789-794):
+
+```ts
+      case 'create_note': {
+        const { note_path, content, frontmatter } = CreateNoteSchema.parse(args);
+        createNote(VAULT_ROOT, note_path, content, frontmatter);
+        const embedding = await embedUpdatedNote(note_path);
+        syncScheduler.markDirty(note_path);
+        const result = { success: true, note_path, ...embedding };
+```
+
+with:
+
+```ts
+      case 'create_note': {
+        const { note_path, content, frontmatter } = CreateNoteSchema.parse(args);
+        const writtenPath = createNote(VAULT_ROOT, note_path, content, frontmatter);
+        const embedding = await embedUpdatedNote(writtenPath);
+        syncScheduler.markDirty(writtenPath);
+        const result = { success: true, note_path: writtenPath, ...embedding };
+```
 
 - [ ] **Step 6: Filter `listByPrefix` by existence**
 
@@ -828,12 +1094,25 @@ of the same path therefore resurrected the note as a fragment -- in one
 session, with no external editor involved. That is now covered by a
 regression test.
 
-Writes resolve in write mode, deletes drop the source from the index, and
-listByPrefix verifies each path exists before returning it, which is
-issue #4 directly.
+A second, narrower recurrence was reported afterward: passing the
+correct, currently-valid, on-disk path directly -- nothing stale handed
+to the caller -- still fabricated a file at a different, stale-indexed
+location sharing the same basename. resolveNotePath was preferring a
+basename match over an unindexed-but-real literal path. Write mode's
+disabled basename fallback closes this the same way; the handler's
+catch-and-fall-back-to-literal-path plus note-writer's own existence
+check make the literal path authoritative regardless of what the index
+says.
+
+Writes resolve in write mode, deletes drop the source from the index,
+listByPrefix verifies each path exists before returning it, and both
+create entry points now surface the extension-normalized path from
+createNote so the response and the sync/index bookkeeping agree with
+what was actually written on disk.
 
 Closes #4
 Closes #7
+Closes #11
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01K4mPAWNTYd7DgX5zMuGLe6
@@ -842,7 +1121,7 @@ EOF
 
 ---
 
-### Task 5: Document the behavior change
+### Task 6: Document the behavior change
 
 **Files:**
 - Modify: `CHANGELOG.md`
@@ -860,6 +1139,7 @@ Add at the top of the version list. Content to convey:
 - **Changed (breaking):** edits and deletes no longer resolve a bare note name by basename. `note_path` must be an exact path, a path without the `.md` suffix, or a case-insensitive match. The error lists the candidates it declined. Reads are unaffected.
 - **Fixed:** deleting a note now removes it from the in-memory index, so a later edit of the same path cannot resurrect it (#7).
 - **Fixed:** index entries whose file is missing are dropped at startup, so `listByPrefix` and search no longer surface notes that were moved or deleted (#4).
+- **Fixed:** `create_note` and `note_workflow action=create` now append `.md` when the caller omits it, instead of silently writing a file Obsidian's indexer never sees (#11).
 
 - [ ] **Step 3: Commit**
 
@@ -882,8 +1162,10 @@ EOF
 
 ## Done criteria
 
-- [ ] `npx vitest run` passes; total is 143 + 14 new tests (4 in Task 1, 4 in Task 2, 5 in Task 3, 1 in Task 4).
+- [ ] `npx vitest run` passes; total is 143 + 19 new tests (4 in Task 1, 4 in Task 2, 5 in Task 3, 4 in Task 4, 2 in Task 5).
 - [ ] `npx tsc --noEmit` reports no errors.
 - [ ] `git status --short` is clean and `dist/` was never staged.
 - [ ] The delete→edit reproduction test exists and passes.
+- [ ] The literal-path-vs-stale-basename regression test (Task 5, Step 2b) exists and passes — this is the exact scenario from the #7 recurrence report.
+- [ ] `createNote('Setup/Claude profiles setup', ...)` (no extension) writes `Setup/Claude profiles setup.md` and nothing else.
 - [ ] Editing an existing **empty** note still works — verify this specifically; it is the regression this plan most risks.
