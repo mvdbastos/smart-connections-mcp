@@ -39,6 +39,13 @@ export declare class GitManager {
      */
     commitAll(message: string, authorName?: string, authorEmail?: string): GitCommitResult;
     /**
+     * Paths git can actually act on: present on disk, or tracked in the index so
+     * a deletion can be staged. A path that is neither was created and deleted
+     * before it was ever committed -- there is nothing to commit for it, and
+     * passing it to `git add` aborts the entire batch on an unmatched pathspec.
+     */
+    private committablePaths;
+    /**
      * Commit specific files
      */
     commitSpecific(filePaths: string[], message: string, authorName?: string, authorEmail?: string): GitCommitResult;

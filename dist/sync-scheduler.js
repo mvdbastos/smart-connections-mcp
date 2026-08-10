@@ -22,12 +22,17 @@ export class SyncScheduler {
     commitRetried = false;
     lastCommitError;
     pushState;
+    journal;
+    quarantined = new Map();
+    previouslyQuarantined = new Set();
     constructor(gitOps, options = {}) {
         this.gitOps = gitOps;
         this.commitIdleMs = options.commitIdleMs ?? DEFAULT_COMMIT_IDLE_MS;
         this.pushIdleMs = options.pushIdleMs ?? DEFAULT_PUSH_IDLE_MS;
         this.maxDeferMs = options.maxDeferMs ?? DEFAULT_MAX_DEFER_MS;
         this.onIdleFlush = options.onIdleFlush;
+        this.journal = options.journal;
+        this.recoverFromJournal();
     }
     markDirty(notePath, deferHintSeconds) {
         this.dirtyPaths.add(notePath);
@@ -40,6 +45,7 @@ export class SyncScheduler {
             delay = Math.max(this.commitIdleMs, hintMs, remaining);
         }
         this.scheduleCommit(delay);
+        this.persist();
     }
     getStatus() {
         const now = Date.now();
@@ -55,6 +61,8 @@ export class SyncScheduler {
             pushInSeconds: this.pushTimer ? Math.ceil(Math.max(this.pushDeadline - now, 0) / 1000) : null,
             lastCommitError: this.lastCommitError,
             pushState: this.pushState,
+            quarantinedPaths: Array.from(this.quarantined.keys()),
+            quarantineSurvivedRestart: Array.from(this.quarantined.values()).some((entry) => entry.survivedRestart),
         };
     }
     /** A manual commit tool ran: pending changes are committed externally. */
@@ -64,6 +72,7 @@ export class SyncScheduler {
         this.commitRetried = false;
         this.lastCommitError = undefined;
         this.startPushTimer();
+        this.persist();
     }
     /** A manual push/sync tool ran: nothing left to push. */
     notifyManualPush() {
@@ -131,11 +140,13 @@ export class SyncScheduler {
             this.commitRetried = false;
             this.lastCommitError = undefined;
             this.startPushTimer();
+            this.persist();
         }
         else if (result.error === 'No changes to commit') {
             this.dirtyPaths.clear();
             this.commitRetried = false;
             this.lastCommitError = undefined;
+            this.persist();
         }
         else {
             this.lastCommitError = result.error;
@@ -143,6 +154,50 @@ export class SyncScheduler {
                 this.commitRetried = true;
                 this.scheduleCommit(this.commitIdleMs);
             }
+            else {
+                this.isolateAndQuarantine(paths, result.error ?? 'unknown error');
+            }
+            this.persist();
+        }
+    }
+    /**
+     * A batch commit failure does not say which path caused it -- commitPaths
+     * fails as a unit. Rather than blame the whole batch, retry each path alone:
+     * the ones that can commit do, and only the ones that genuinely cannot are
+     * quarantined. Bounded -- N git calls, once, on a repeated failure.
+     */
+    isolateAndQuarantine(paths, batchError) {
+        let anyCommitted = false;
+        for (const notePath of paths) {
+            let ok = false;
+            let error = batchError;
+            try {
+                const single = this.gitOps.commitPaths([notePath], `Auto-commit: ${notePath}`);
+                ok = single.success || single.error === 'No changes to commit';
+                if (!ok) {
+                    error = single.error ?? batchError;
+                }
+            }
+            catch (thrown) {
+                error = thrown instanceof Error ? thrown.message : String(thrown);
+            }
+            this.dirtyPaths.delete(notePath);
+            if (ok) {
+                anyCommitted = true;
+                this.quarantined.delete(notePath);
+            }
+            else {
+                this.quarantined.set(notePath, {
+                    path: notePath,
+                    error,
+                    since: this.quarantined.get(notePath)?.since ?? new Date().toISOString(),
+                    survivedRestart: this.previouslyQuarantined.has(notePath),
+                });
+            }
+        }
+        this.commitRetried = false;
+        if (anyCommitted) {
+            this.startPushTimer();
         }
     }
     firePush() {
@@ -171,6 +226,39 @@ export class SyncScheduler {
         if (typeof timer.unref === 'function') {
             timer.unref();
         }
+    }
+    /** Write the complete current state. Fail-soft inside SyncJournal. */
+    persist() {
+        this.journal?.write({
+            pending: Array.from(this.dirtyPaths),
+            quarantined: Array.from(this.quarantined.values()),
+        });
+    }
+    /**
+     * Restore state left by a session that died before flushing.
+     *
+     * Quarantined paths are put back into the dirty set rather than left
+     * quarantined: a restart may well have cleared the cause, such as a stale
+     * index.lock. They are remembered so that failing *again* marks them as
+     * having survived a restart, which is what escalates to the report hint.
+     */
+    recoverFromJournal() {
+        if (!this.journal) {
+            return;
+        }
+        const state = this.journal.read();
+        if (state.pending.length === 0 && state.quarantined.length === 0) {
+            return;
+        }
+        for (const notePath of state.pending) {
+            this.dirtyPaths.add(notePath);
+        }
+        for (const entry of state.quarantined) {
+            this.previouslyQuarantined.add(entry.path);
+            this.dirtyPaths.add(entry.path);
+        }
+        console.error(`Recovered ${this.dirtyPaths.size} pending path(s) from an interrupted session`);
+        this.scheduleCommit(this.commitIdleMs);
     }
 }
 //# sourceMappingURL=sync-scheduler.js.map

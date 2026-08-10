@@ -17,7 +17,7 @@ export interface EditResult {
     previousHash: string;
     newHash: string;
 }
-export declare function createNote(vault: string, notePath: string, body: string, frontmatter?: Record<string, unknown>): void;
+export declare function createNote(vault: string, notePath: string, body: string, frontmatter?: Record<string, unknown>): string;
 export declare function editNote(vault: string, notePath: string, options: EditOptions): EditResult;
 export declare function editNote(vault: string, notePath: string, content: string, mode: EditMode, heading?: string): EditResult;
 export declare function deleteNote(vault: string, notePath: string): void;

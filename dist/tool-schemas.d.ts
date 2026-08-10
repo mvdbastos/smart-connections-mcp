@@ -8,7 +8,7 @@ export declare const EditNoteSchema: z.ZodEffects<z.ZodObject<{
     regex: z.ZodOptional<z.ZodBoolean>;
     count: z.ZodOptional<z.ZodNumber>;
     dry_run: z.ZodOptional<z.ZodBoolean>;
-}, "strip", z.ZodTypeAny, {
+}, "strict", z.ZodTypeAny, {
     content: string;
     note_path: string;
     mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
@@ -57,7 +57,7 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     count: z.ZodOptional<z.ZodNumber>;
     dry_run: z.ZodOptional<z.ZodBoolean>;
     defer_hint_seconds: z.ZodOptional<z.ZodNumber>;
-}, "strip", z.ZodTypeAny, {
+}, "strict", z.ZodTypeAny, {
     note_path: string;
     mode: "replace" | "overwrite" | "append" | "append-section" | "insert-after-heading";
     action: "create" | "edit" | "delete";
@@ -106,5 +106,10 @@ export declare const NoteWorkflowSchema: z.ZodEffects<z.ZodObject<{
     frontmatter?: Record<string, unknown> | undefined;
     defer_hint_seconds?: number | undefined;
 }>;
+/**
+ * Valid parameter names per tool, derived from the Zod shapes so the list can
+ * never drift from what the schema actually accepts.
+ */
+export declare const TOOL_KEYS: Record<string, string[]>;
 export declare function formatToolError(toolName: string, error: unknown): string;
 //# sourceMappingURL=tool-schemas.d.ts.map

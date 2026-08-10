@@ -1,4 +1,8 @@
 import { z } from 'zod';
+/** The only native memory location these prompts ever operate on. */
+const NATIVE_MEMORY_ROOT = '.claude/projects/<slug>/memory/';
+/** Exclusion guard for prompts that instruct native-memory writes. */
+const SCOPE_GUARD = `**Scope is exact.** "Native memory" in this prompt means \`${NATIVE_MEMORY_ROOT}\` and nothing else. Never scan, read, or rewrite \`/memories/\` or any other assistant-level memory store under this instruction.`;
 // Zod schemas for argument validation
 const CaptureMemoryArgsSchema = z.object({
     topic: z.string().min(1, 'topic required'),
@@ -214,7 +218,7 @@ Read tools remain fully available — \`search_notes\`, \`get_note_content\`, \`
 
 ## Known limitation
 
-This cannot stop Claude Code's built-in memory system from writing to \`.claude/projects/<slug>/memory/\`. That behavior lives in the harness, not in this MCP server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
+This cannot stop Claude Code's built-in memory system from writing to \`${NATIVE_MEMORY_ROOT}\`. That behavior lives in the harness, not in this MCP server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
 
 Run the \`init\` prompt again to re-enable autonomous capture.`;
         },
@@ -252,7 +256,9 @@ Run the \`init\` prompt again to re-enable autonomous capture.`;
             }
             return `Autonomous memory capture is now **ACTIVE**.
 
-You keep memory in two tiers. The **Obsidian vault is the system of record** — it holds the full text of every memory. Your native memory directory (\`.claude/projects/<slug>/memory/\`) holds only a **stub**: name, description, and a \`vault_note\` pointer. Native answers "is there something relevant here?"; the vault answers "what does it say?"${projectNote}${existing}
+You keep memory in two tiers. The **Obsidian vault is the system of record** — it holds the full text of every memory. Your native memory directory (\`${NATIVE_MEMORY_ROOT}\`) holds only a **stub**: name, description, and a \`vault_note\` pointer. Native answers "is there something relevant here?"; the vault answers "what does it say?"
+
+${SCOPE_GUARD}${projectNote}${existing}
 
 ## When to capture
 
@@ -354,7 +360,7 @@ Run the \`disable\` prompt to switch this off for the rest of the conversation.`
     },
     {
         name: 'migrate',
-        description: 'Sweep this project\'s native memory files into the vault, leaving recall stubs behind.',
+        description: `Sweep this project's native memory files (${NATIVE_MEMORY_ROOT}) into the vault, leaving recall stubs behind.`,
         arguments: [
             {
                 name: 'project',
@@ -384,11 +390,13 @@ Run the \`disable\` prompt to switch this off for the rest of the conversation.`
             catch {
                 // Fail soft; continue with plain instructions
             }
-            return `Sweep your native memory directory and move every unmigrated memory into the Obsidian vault. The vault becomes the full record; each native file is reduced to a stub that still drives recall.${projectNote}${alreadyThere}
+            return `Sweep your native memory directory (\`${NATIVE_MEMORY_ROOT}\`) and move every unmigrated memory into the Obsidian vault. The vault becomes the full record; each native file is reduced to a stub that still drives recall.
+
+${SCOPE_GUARD}${projectNote}${alreadyThere}
 
 ## Find the backlog
 
-List every \`.md\` file in \`.claude/projects/<slug>/memory/\` except \`MEMORY.md\`, and read each one's frontmatter. **A file with a \`vault_note\` field under \`metadata\` is already migrated — skip it.** That field is the only authoritative marker; never infer migration state from the vault listing, which lags until notes are indexed.
+List every \`.md\` file in \`${NATIVE_MEMORY_ROOT}\` except \`MEMORY.md\`, and read each one's frontmatter. **A file with a \`vault_note\` field under \`metadata\` is already migrated — skip it.** That field is the only authoritative marker; never infer migration state from the vault listing, which lags until notes are indexed.
 
 Report the files you are about to migrate before writing anything. You do not need to wait for confirmation — invoking this prompt is the confirmation.
 

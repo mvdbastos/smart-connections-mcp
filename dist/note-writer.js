@@ -99,19 +99,24 @@ function insertAfterHeading(current, heading, content) {
     return lines.join('\n');
 }
 export function createNote(vault, notePath, body, frontmatter) {
-    const file = safe(vault, notePath);
+    const normalizedPath = notePath.toLowerCase().endsWith('.md') ? notePath : `${notePath}.md`;
+    const file = safe(vault, normalizedPath);
     if (fs.existsSync(file)) {
-        throw new Error(`Note already exists: ${notePath}`);
+        throw new Error(`Note already exists: ${normalizedPath}`);
     }
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, `${frontmatterYaml(frontmatter)}${body}`, 'utf-8');
+    return normalizedPath;
 }
 export function editNote(vault, notePath, contentOrOptions, mode, heading) {
     const options = typeof contentOrOptions === 'string'
         ? { content: contentOrOptions, mode: mode ?? 'append', heading }
         : contentOrOptions;
     const file = safe(vault, notePath);
-    const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+    if (!fs.existsSync(file)) {
+        throw new Error(`Note not found: "${notePath}". Use action=create to create it.`);
+    }
+    const current = fs.readFileSync(file, 'utf-8');
     const content = options.content ?? '';
     let next;
     if (options.mode === 'overwrite') {
@@ -149,7 +154,6 @@ export function editNote(vault, notePath, contentOrOptions, mode, heading) {
         result.diff = unifiedDiff(notePath, current, next);
         return result;
     }
-    fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, next, 'utf-8');
     result.written = true;
     if (changed) {
@@ -158,6 +162,10 @@ export function editNote(vault, notePath, contentOrOptions, mode, heading) {
     return result;
 }
 export function deleteNote(vault, notePath) {
-    fs.rmSync(safe(vault, notePath));
+    const file = safe(vault, notePath);
+    if (!fs.existsSync(file)) {
+        throw new Error(`Note not found: "${notePath}". Nothing to delete.`);
+    }
+    fs.rmSync(file);
 }
 //# sourceMappingURL=note-writer.js.map
