@@ -7,6 +7,7 @@ import { EditNoteSchema, NoteWorkflowSchema, TOOL_KEYS, formatToolError } from '
 import { tools } from './tool-definitions.js';
 import { createNote, editNote, deleteNote } from './note-writer.js';
 import { SmartConnectionsLoader } from './smart-connections-loader.js';
+import { MEMORY_RESOURCES } from './resources.js';
 
 describe('edit_note schema', () => {
   it('rejects replace mode without find and accepts valid replace', () => {
@@ -276,5 +277,21 @@ describe('a literal correct path wins over a stale basename match', () => {
     } finally {
       fs.rmSync(vault, { recursive: true, force: true });
     }
+  });
+});
+
+describe('agent-facing naming', () => {
+  it('never calls the vault or the server by a legacy name in tool descriptions', () => {
+    const text = tools.map((tool) => `${tool.name} ${tool.description}`).join('\n');
+
+    expect(text).not.toMatch(/Smart Connections/);
+    expect(text).not.toMatch(/smart-connections-mcp/);
+  });
+
+  it('never calls the vault or the server by a legacy name in resource content', () => {
+    const text = MEMORY_RESOURCES.map((resource) => resource.text).join('\n');
+
+    expect(text).not.toMatch(/Smart Connections/);
+    expect(text).not.toMatch(/smart-connections-mcp/);
   });
 });
