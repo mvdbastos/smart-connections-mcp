@@ -36,6 +36,7 @@ import { SyncScheduler } from './sync-scheduler.js';
 import type { SyncStatus } from './sync-scheduler.js';
 import { SyncJournal } from './sync-journal.js';
 import { buildRemediationHint, buildReportHint } from './sync-hints.js';
+import { buildIndexRefusalHint, buildSearchIndexWarning } from './index-health-hints.js';
 import { EditNoteSchema, NoteWorkflowSchema, formatToolError } from './tool-schemas.js';
 import { tools } from './tool-definitions.js';
 import type { EditOptions } from './note-writer.js';
@@ -453,11 +454,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           includeContent: include_content,
           contentMaxChars: content_max_chars,
         });
+
+        // Only wrap when the index is unreconciled: the bare-array shape is the
+        // documented contract, and an agent seeing the wrapper is already in the
+        // case that warrants a closer look. Attached regardless of result count --
+        // an empty result set from a phantom-laden index is itself misleading.
+        const indexWarning = buildSearchIndexWarning(loader.getIndexHealth());
+        const payload = indexWarning ? { results, index_warning: indexWarning } : results;
+
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(results, null, 2),
+              text: JSON.stringify(payload, null, 2),
             },
           ],
         };
@@ -657,10 +666,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           gitStatus = gitManager.getStatus();
         }
 
+        const indexHealth = loader.getIndexHealth();
         const combinedStats = {
           ...stats,
           git: gitStatus,
           sync: syncScheduler.getStatus(),
+          index: {
+            indexed: indexHealth.indexed,
+            missing: indexHealth.missing,
+            dropped: indexHealth.dropped,
+            refused: indexHealth.refused,
+            missing_sample: indexHealth.missingSample,
+            ...(indexHealth.refused
+              ? { hint: buildIndexRefusalHint(VAULT_ROOT, indexHealth) }
+              : {}),
+          },
         };
 
         return {
