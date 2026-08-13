@@ -3,11 +3,22 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+/** How many missing paths to keep for diagnosis. Bounded so a large drift does not flood a response. */
+const MISSING_SAMPLE_LIMIT = 10;
+/** Below this many entries, "all of them are gone" is unremarkable rather than a signal. */
+const FULL_MISS_FLOOR = 5;
 export class SmartConnectionsLoader {
     vaultPath;
     smartEnvPath;
     config = null;
     sources = new Map();
+    indexHealth = {
+        indexed: 0,
+        missing: 0,
+        dropped: 0,
+        refused: false,
+        missingSample: [],
+    };
     constructor(vaultPath) {
         this.vaultPath = vaultPath;
         this.smartEnvPath = path.join(vaultPath, '.smart-env');
@@ -215,10 +226,17 @@ export class SmartConnectionsLoader {
      * Drop indexed entries with no file behind them.
      *
      * Two-phase on purpose: the missing set is collected first, then checked
-     * against the total before anything is deleted. If more than half the index
-     * is missing, that is a systemic fault -- a wrong vault path, an unmounted
-     * drive -- not staleness, and silently emptying the index would degrade the
-     * server to "no notes exist" with no error raised.
+     * before anything is deleted. The check is exactly-100%-missing rather than
+     * a ratio. A ratio is a one-way trap -- staleness only ever increases, so
+     * the entries that would bring the ratio back under threshold are the ones
+     * the guard refuses to drop, and the only call site is initialize().
+     *
+     * There is deliberately no vault-exists or non-empty check here. initialize()
+     * throws at :25, :45, and :59 before this runs, so <vault>/.smart-env/multi/
+     * provably exists by now; such a check could never be false.
+     *
+     * This mutates the in-memory Map only. The .ajson files are never rewritten,
+     * so a wrong decision here costs one process lifetime and no more.
      */
     reconcileWithFilesystem() {
         const missing = [];
@@ -227,19 +245,42 @@ export class SmartConnectionsLoader {
                 missing.push(notePath);
             }
         }
+        const indexed = this.sources.size;
+        const missingSample = missing.slice(0, MISSING_SAMPLE_LIMIT);
         if (missing.length === 0) {
+            this.indexHealth = { indexed, missing: 0, dropped: 0, refused: false, missingSample: [] };
             return 0;
         }
-        if (missing.length > this.sources.size / 2) {
-            console.error(`Refusing to reconcile: ${missing.length} of ${this.sources.size} indexed notes are missing from ${this.vaultPath}. ` +
-                'This looks like a wrong vault path or an unavailable drive rather than stale index entries. Index left intact.');
+        // Every indexed note absent means .smart-env describes a different folder
+        // than the one it sits in -- a copied or restored env directory, or notes
+        // moved wholesale. Ordinary staleness never reaches 100%: something always
+        // survives.
+        if (missing.length === indexed && indexed >= FULL_MISS_FLOOR) {
+            this.indexHealth = { indexed, missing: missing.length, dropped: 0, refused: true, missingSample };
+            console.error(`Refusing to reconcile: all ${indexed} indexed notes are missing from ${this.vaultPath}. ` +
+                'The index describes a different folder than the one it sits in. Index left intact.');
             return 0;
         }
         for (const notePath of missing) {
             this.sources.delete(notePath);
         }
-        console.error(`Dropped ${missing.length} stale index entries with no file on disk`);
+        this.indexHealth = {
+            indexed,
+            missing: missing.length,
+            dropped: missing.length,
+            refused: false,
+            missingSample,
+        };
+        console.error(`Dropped ${missing.length} stale index entries with no file on disk: ${missingSample.join(', ')}` +
+            (missing.length > missingSample.length ? `, and ${missing.length - missingSample.length} more` : ''));
         return missing.length;
+    }
+    /**
+     * Snapshot of the last reconcile pass. Returns a copy so callers cannot
+     * mutate loader state through it.
+     */
+    getIndexHealth() {
+        return { ...this.indexHealth, missingSample: [...this.indexHealth.missingSample] };
     }
     /**
      * Get configuration

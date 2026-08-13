@@ -6,7 +6,7 @@
  * following the NEXT_STEPS_TEXT precedent.
  */
 
-const ISSUE_TRACKER = 'mvdbastos/smart-connections-mcp';
+import { ISSUE_TRACKER } from './issue-tracker.js';
 
 /**
  * Deliberately bounded: named causes with exact commands, and an explicit
@@ -43,7 +43,7 @@ export function buildRemediationHint(vaultRoot: string, error: string): string {
  */
 export function buildReportHint(error: string, quarantinedPaths: string[]): string {
   return [
-    'This failure survived a restart and is likely a bug in smart-connections-mcp.',
+    'This failure survived a restart and is likely a bug in the vault server.',
     '',
     'Search existing issues first:',
     `  gh issue list -R ${ISSUE_TRACKER} --search "${error.replace(/"/g, "'")}"`,

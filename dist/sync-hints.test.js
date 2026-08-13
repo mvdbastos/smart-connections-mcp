@@ -24,5 +24,10 @@ describe('sync escalation hints', () => {
         expect(hint).toContain('gh issue list');
         expect(hint).toContain('mvdbastos/smart-connections-mcp');
     });
+    it('calls the software the vault server, not a package name', () => {
+        const hint = buildReportHint('fatal: unable to write', ['A.md']);
+        expect(hint).toContain('the vault server');
+        expect(hint).not.toMatch(/a bug in smart-connections-mcp/);
+    });
 });
 //# sourceMappingURL=sync-hints.test.js.map

@@ -193,7 +193,7 @@ export const tools = [
     },
     {
         name: 'get_stats',
-        description: 'Get statistics about the Smart Connections knowledge base (total notes, blocks, embedding model, etc.).',
+        description: 'Get statistics about the vault (total notes, blocks, embedding model, etc.).',
         inputSchema: {
             type: 'object',
             properties: {},

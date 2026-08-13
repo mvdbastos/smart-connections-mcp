@@ -218,7 +218,7 @@ Call \`get_stats\` to see:
 
 ## Model
 
-Smart Connections uses **TaylorAI/bge-micro-v2** (384-dimensional, ~27MB).
+The vault index uses **TaylorAI/bge-micro-v2** (384-dimensional, ~27MB).
 
 - **Lazy init**: Loaded on first search or write; does not block server startup.
 - **Cached**: Stays in memory for subsequent operations.

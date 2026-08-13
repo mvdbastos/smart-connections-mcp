@@ -139,12 +139,15 @@ describe('index/filesystem reconciliation', () => {
             fs.rmSync(vault, { recursive: true, force: true });
         }
     });
-    it('keeps the index intact when more than half the files are missing', async () => {
+    it('reconciles even when most files are missing', async () => {
         const vault = createVaultWithStaleSources(['A.md', 'B.md', 'C.md', 'D.md'], ['A.md']);
         try {
             const loader = new SmartConnectionsLoader(vault);
             await loader.initialize();
-            expect(loader.getSources().size).toBe(4);
+            expect(loader.getSources().size).toBe(1);
+            expect(loader.getSources().has('A.md')).toBe(true);
+            expect(loader.getIndexHealth().dropped).toBe(3);
+            expect(loader.getIndexHealth().refused).toBe(false);
         }
         finally {
             fs.rmSync(vault, { recursive: true, force: true });
@@ -157,6 +160,103 @@ describe('index/filesystem reconciliation', () => {
             await loader.initialize();
             expect(loader.getSources().size).toBe(3);
             expect(loader.getSources().has('D.md')).toBe(false);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('refuses when every indexed note is missing', async () => {
+        const indexed = ['A.md', 'B.md', 'C.md', 'D.md', 'E.md', 'F.md'];
+        const vault = createVaultWithStaleSources(indexed, []);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            expect(loader.getSources().size).toBe(6);
+            const health = loader.getIndexHealth();
+            expect(health.refused).toBe(true);
+            expect(health.dropped).toBe(0);
+            expect(health.indexed).toBe(6);
+            expect(health.missing).toBe(6);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('reconciles when every note is missing but the index is tiny', async () => {
+        const vault = createVaultWithStaleSources(['A.md', 'B.md', 'C.md', 'D.md'], []);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            expect(loader.getSources().size).toBe(0);
+            expect(loader.getIndexHealth().refused).toBe(false);
+            expect(loader.getIndexHealth().dropped).toBe(4);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('caps the missing sample at ten paths', async () => {
+        const indexed = Array.from({ length: 12 }, (_, i) => `Note${i}.md`);
+        const vault = createVaultWithStaleSources(indexed, []);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            const health = loader.getIndexHealth();
+            expect(health.missing).toBe(12);
+            expect(health.missingSample).toHaveLength(10);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('refuses exactly at the floor: five indexed, all missing', async () => {
+        const vault = createVaultWithStaleSources(['A.md', 'B.md', 'C.md', 'D.md', 'E.md'], []);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            expect(loader.getSources().size).toBe(5);
+            expect(loader.getIndexHealth().refused).toBe(true);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('reconciles at the reported ratio from issue #13', async () => {
+        const indexed = Array.from({ length: 66 }, (_, i) => `Note${i}.md`);
+        const onDisk = indexed.slice(0, 32);
+        const vault = createVaultWithStaleSources(indexed, onDisk);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            expect(loader.getSources().size).toBe(32);
+            expect(loader.getIndexHealth().dropped).toBe(34);
+            expect(loader.getIndexHealth().refused).toBe(false);
+        }
+        finally {
+            fs.rmSync(vault, { recursive: true, force: true });
+        }
+    });
+    it('exposes a readable health snapshot before initialize runs', () => {
+        const loader = new SmartConnectionsLoader('/nonexistent');
+        expect(loader.getIndexHealth()).toEqual({
+            indexed: 0,
+            missing: 0,
+            dropped: 0,
+            refused: false,
+            missingSample: [],
+        });
+    });
+    it('getIndexHealth returns a copy that cannot mutate loader state', async () => {
+        const indexed = ['A.md', 'B.md', 'C.md', 'D.md', 'E.md', 'F.md'];
+        const vault = createVaultWithStaleSources(indexed, []);
+        try {
+            const loader = new SmartConnectionsLoader(vault);
+            await loader.initialize();
+            const health = loader.getIndexHealth();
+            health.missingSample.push('injected.md');
+            health.refused = false;
+            expect(loader.getIndexHealth().missingSample).not.toContain('injected.md');
+            expect(loader.getIndexHealth().refused).toBe(true);
         }
         finally {
             fs.rmSync(vault, { recursive: true, force: true });

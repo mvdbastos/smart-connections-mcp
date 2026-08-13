@@ -1,5 +1,18 @@
 # Changelog
 
+## index-reconcile-recovery
+
+### Fixed
+- The index no longer refuses to reconcile forever once more than half its entries go stale. The old `>50%` guard was a one-way trap: staleness only increases, and the entries that would bring the ratio back under threshold were exactly the ones it refused to drop, so every restart reached the same refusal (#13). Reconcile now refuses only when every indexed note is missing and there are at least five of them, which indicates `.smart-env` describes a different folder than the one it sits in. A vault already stuck in the old state recovers on its first start after this change, with no migration step.
+
+### Added
+- `index` block in `get_stats` reporting how many entries were indexed, missing, and dropped at startup, with a sample of missing paths. A refused reconcile also carries a hint asking the user whether to investigate the vault directly or open an issue.
+- `index_warning` on `search_notes` responses while the index is unreconciled, so results that may contain paths with no file behind them announce it. Present only in that state; it carries counts, never note paths.
+
+### Changed
+- `search_notes` wraps its results as `{ results, index_warning }` while the index is unreconciled. The normal response shape is unchanged.
+- Text handed to an agent now calls the notes and their index "the vault", and the software "the vault server", replacing "Smart Connections", "smart-connections-mcp", and "this MCP server".
+
 ## prompt-scope-and-arg-errors
 
 ### Changed
