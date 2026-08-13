@@ -218,7 +218,7 @@ Read tools remain fully available — \`search_notes\`, \`get_note_content\`, \`
 
 ## Known limitation
 
-This cannot stop Claude Code's built-in memory system from writing to \`${NATIVE_MEMORY_ROOT}\`. That behavior lives in the harness, not in this MCP server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
+This cannot stop Claude Code's built-in memory system from writing to \`${NATIVE_MEMORY_ROOT}\`. That behavior lives in the harness, not in the vault server. Memories written while capture is off land there as ordinary full files with no \`vault_note\` field, which makes them migration backlog — the \`migrate\` prompt or the on-access rule will collect them later. Nothing is lost.
 
 Run the \`init\` prompt again to re-enable autonomous capture.`;
         },

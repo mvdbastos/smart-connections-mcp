@@ -2,11 +2,28 @@
  * Loader for Smart Connections data from .smart-env directory
  */
 import type { SmartSource, SmartEnvConfig } from './types.js';
+/**
+ * Outcome of the last reconcile pass, so callers can surface it long after
+ * initialize() returned.
+ */
+export interface IndexHealth {
+    /** Entries in the index at reconcile time. */
+    indexed: number;
+    /** Entries with no file on disk. */
+    missing: number;
+    /** Entries actually removed. Zero when refused. */
+    dropped: number;
+    /** True when the guard declined to reconcile. */
+    refused: boolean;
+    /** First MISSING_SAMPLE_LIMIT missing paths, for diagnosis. */
+    missingSample: string[];
+}
 export declare class SmartConnectionsLoader {
     private vaultPath;
     private smartEnvPath;
     private config;
     private sources;
+    private indexHealth;
     constructor(vaultPath: string);
     /**
      * Initialize and load all Smart Connections data
@@ -53,12 +70,24 @@ export declare class SmartConnectionsLoader {
      * Drop indexed entries with no file behind them.
      *
      * Two-phase on purpose: the missing set is collected first, then checked
-     * against the total before anything is deleted. If more than half the index
-     * is missing, that is a systemic fault -- a wrong vault path, an unmounted
-     * drive -- not staleness, and silently emptying the index would degrade the
-     * server to "no notes exist" with no error raised.
+     * before anything is deleted. The check is exactly-100%-missing rather than
+     * a ratio. A ratio is a one-way trap -- staleness only ever increases, so
+     * the entries that would bring the ratio back under threshold are the ones
+     * the guard refuses to drop, and the only call site is initialize().
+     *
+     * There is deliberately no vault-exists or non-empty check here. initialize()
+     * throws at :25, :45, and :59 before this runs, so <vault>/.smart-env/multi/
+     * provably exists by now; such a check could never be false.
+     *
+     * This mutates the in-memory Map only. The .ajson files are never rewritten,
+     * so a wrong decision here costs one process lifetime and no more.
      */
     reconcileWithFilesystem(): number;
+    /**
+     * Snapshot of the last reconcile pass. Returns a copy so callers cannot
+     * mutate loader state through it.
+     */
+    getIndexHealth(): IndexHealth;
     /**
      * Get configuration
      */

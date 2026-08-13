@@ -5,7 +5,7 @@
  * agent reading these hints can. Both are surfaced through the sync block,
  * following the NEXT_STEPS_TEXT precedent.
  */
-const ISSUE_TRACKER = 'mvdbastos/smart-connections-mcp';
+import { ISSUE_TRACKER } from './issue-tracker.js';
 /**
  * Deliberately bounded: named causes with exact commands, and an explicit
  * prohibition on destructive recovery. An open mandate to "fix git" in the
@@ -40,7 +40,7 @@ export function buildRemediationHint(vaultRoot, error) {
  */
 export function buildReportHint(error, quarantinedPaths) {
     return [
-        'This failure survived a restart and is likely a bug in smart-connections-mcp.',
+        'This failure survived a restart and is likely a bug in the vault server.',
         '',
         'Search existing issues first:',
         `  gh issue list -R ${ISSUE_TRACKER} --search "${error.replace(/"/g, "'")}"`,
