@@ -51,6 +51,13 @@ describe('index refusal hint', () => {
     expect(hint).toContain('the vault server');
     expect(hint).not.toContain('Smart Connections');
   });
+
+  it('forbids including note paths in a public issue report', () => {
+    const hint = buildIndexRefusalHint('/vault', refusedHealth());
+
+    expect(hint).toMatch(/Report counts only/i);
+    expect(hint).toMatch(/this repository is public/i);
+  });
 });
 
 describe('search index warning', () => {

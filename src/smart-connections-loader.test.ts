@@ -243,6 +243,35 @@ describe('index/filesystem reconciliation', () => {
     }
   });
 
+  it('refuses exactly at the floor: five indexed, all missing', async () => {
+    const vault = createVaultWithStaleSources(['A.md', 'B.md', 'C.md', 'D.md', 'E.md'], []);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+
+      expect(loader.getSources().size).toBe(5);
+      expect(loader.getIndexHealth().refused).toBe(true);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles at the reported ratio from issue #13', async () => {
+    const indexed = Array.from({ length: 66 }, (_, i) => `Note${i}.md`);
+    const onDisk = indexed.slice(0, 32);
+    const vault = createVaultWithStaleSources(indexed, onDisk);
+    try {
+      const loader = new SmartConnectionsLoader(vault);
+      await loader.initialize();
+
+      expect(loader.getSources().size).toBe(32);
+      expect(loader.getIndexHealth().dropped).toBe(34);
+      expect(loader.getIndexHealth().refused).toBe(false);
+    } finally {
+      fs.rmSync(vault, { recursive: true, force: true });
+    }
+  });
+
   it('exposes a readable health snapshot before initialize runs', () => {
     const loader = new SmartConnectionsLoader('/nonexistent');
 

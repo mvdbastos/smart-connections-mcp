@@ -44,6 +44,8 @@ export function buildIndexRefusalHint(vaultPath: string, health: IndexHealth): s
     '  1. Investigate the vault directly — compare the sampled paths above against',
     `     what is actually under ${vaultPath} and report what differs.`,
     `  2. Open an issue at ${ISSUE_TRACKER}, if those paths look like they should exist.`,
+    '     Report counts only — do NOT include note paths, note titles, or vault',
+    '     contents; this repository is public.',
   ].join('\n');
 }
 

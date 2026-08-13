@@ -83,6 +83,28 @@ describe('prompts', () => {
     }
   });
 
+  it('never calls the vault or the server by a legacy name', async () => {
+    const context: PromptContext = { search: async () => [] as SearchResult[] };
+    const testArgs: Record<string, Record<string, unknown>> = {
+      capture_memory: { topic: 'test' },
+      project_research: { topic: 'test' },
+      cleanup_stale: { query: 'test' },
+      daily_note: {},
+      review_before_write: { note_path: 'test.md' },
+      disable: {},
+      init: {},
+      migrate: {},
+    };
+
+    for (const prompt of MEMORY_PROMPTS) {
+      const args = testArgs[prompt.name] || {};
+      const text = await prompt.build(args, context);
+      expect(text).not.toMatch(/Smart Connections/);
+      expect(text).not.toMatch(/smart-connections-mcp/);
+      expect(text).not.toMatch(/this MCP server/);
+    }
+  });
+
   describe('capture_memory prompt', () => {
     const prompt = MEMORY_PROMPT_BY_NAME.get('capture_memory')!;
 
