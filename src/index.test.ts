@@ -304,4 +304,20 @@ describe('documented tool contract', () => {
     expect(text).not.toMatch(/embedder_ready/);
     expect(text).not.toMatch(/total_notes/);
   });
+
+  it('documents every field get_stats actually returns', () => {
+    const text = MEMORY_RESOURCES.map((resource) => resource.text).join('\n');
+
+    for (const field of [
+      'totalNotes',
+      'totalBlocks',
+      'embeddingDimension',
+      'modelKey',
+      'git',
+      'sync',
+      'index',
+    ]) {
+      expect(text).toContain(field);
+    }
+  });
 });

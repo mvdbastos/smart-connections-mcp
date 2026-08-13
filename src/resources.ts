@@ -162,7 +162,7 @@ Server health and sync state.
 - \`sync\`: Commit/push state, pending paths, errors
 - \`index\`: Startup reconcile counts — \`indexed\`, \`missing\`, \`dropped\`, \`refused\`, \`missing_sample\`, and \`hint\` when refused
 
-\`index.indexed\` is a startup snapshot; \`totalNotes\` is read live. After a reconcile drops entries the two differ by design: \`indexed\` - \`dropped\` = \`totalNotes\`.
+\`index.indexed\` is a startup snapshot; \`totalNotes\` is read live. After startup reconcile, \`indexed\` - \`dropped\` = \`totalNotes\`; the two drift apart as writes create and delete notes.
 
 ---
 
@@ -237,7 +237,7 @@ The vault index uses **TaylorAI/bge-micro-v2** (384-dimensional, ~27MB).
 Every write via **note_workflow** refreshes the note's embedding:
 - \`action: 'create'\` → embeds the new note
 - \`action: 'edit'\` → re-embeds the updated note
-- \`action: 'delete'\` → removes the embedding
+- \`action: 'delete'\` → drops the note from the in-memory index; the stored vector stays in the \`.ajson\` file
 
 Embeddings are stored in the vault at \`.smart-env/multi/*.ajson\`.
 
@@ -247,7 +247,7 @@ If the embedding model fails to load (memory, architecture, or dependency issues
 - **Writes still succeed** — notes are created/edited/deleted normally.
 - **Search falls back to keywords** — \`search_notes\` matches on title and body text only (no semantic similarity).
 
-The fallback is automatic — no configuration or restart is needed. \`get_stats\` does not currently report model status.
+The fallback is automatic — writes and searches keep working with no configuration. The model is loaded once at startup; if that load fails the server stays in keyword mode until it is restarted. \`get_stats\` does not currently report model status.
 
 ## Performance
 

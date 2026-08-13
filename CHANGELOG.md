@@ -4,7 +4,7 @@
 
 ### Fixed
 - `get_stats` documentation named three fields the tool does not return — `total_notes`, `total_vectors`, and `embedder_ready`. The latter two exist nowhere in the source, and one resource instructed agents to check `embedder_ready` to verify model status, an instruction that could never succeed. The documented contract now matches what the handler emits.
-- The index refusal hint claimed the vault server "never rewrites" the `.ajson` files; it appends to them on every write. The prohibition on deleting or hand-editing them stands, now with the accurate reason: the server only appends new vectors and never regenerates deleted ones.
+- The index refusal hint claimed the vault server "never rewrites" the `.ajson` files; it appends to them on every note create or edit. The prohibition on deleting or hand-editing them stands, now with the accurate reason: the server only appends new vectors and never regenerates deleted ones.
 - Stale line-number citations in the `reconcileWithFilesystem` comment, replaced with the conditions they referred to so they cannot drift again.
 
 ### Added

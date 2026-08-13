@@ -476,9 +476,9 @@ Expected: PASS — the `documented tool contract` test now passes along with eve
 
 - [ ] **Step 7: Verify the phantom field names are gone from the whole source tree**
 
-Run: `grep -rn "total_vectors\|embedder_ready" src/ && echo "STILL PRESENT" || echo "gone"`
+Run: `grep -rn "total_vectors\|embedder_ready" src/ --include="*.ts" | grep -v "\.test\.ts" && echo "STILL PRESENT IN SOURCE" || echo "gone from non-test source"`
 
-Expected: `gone`
+Expected: `gone from non-test source`
 
 - [ ] **Step 8: Typecheck**
 
