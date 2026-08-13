@@ -232,10 +232,11 @@ export class SmartConnectionsLoader {
      * the guard refuses to drop, and the only call site is initialize().
      *
      * There is deliberately no vault-exists or non-empty check here. initialize()
-     * throws at :25, :45, and :59 before this runs, so <vault>/.smart-env/multi/
-     * provably exists by now; such a check could never be false.
+     * throws on a missing .smart-env, a missing smart_env.json, or a missing
+     * multi/ before this runs, so <vault>/.smart-env/multi/ provably exists by
+     * now; such a check could never be false.
      *
-     * This mutates the in-memory Map only. The .ajson files are never rewritten,
+     * This function never writes to .ajson -- it mutates the in-memory Map only,
      * so a wrong decision here costs one process lifetime and no more.
      */
     reconcileWithFilesystem() {
