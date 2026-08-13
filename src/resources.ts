@@ -107,6 +107,10 @@ Semantic search with keyword fallback. Returns top-k matching notes.
 - \`include_content\`: Embed note text in results (default false)
 - \`content_max_chars\`: Max characters per note (default 2000)
 
+**Returns:** an array of matching notes.
+
+While the index is unreconciled the response is wrapped as \`{ results, index_warning }\` instead. \`index_warning\` carries counts explaining that some results may have no file behind them — call \`get_stats\` for the full diagnosis. The wrap is absent in normal operation.
+
 ## get_similar_notes
 
 Find notes semantically similar to a reference note.
@@ -150,10 +154,15 @@ Read a note's full text and optionally extract sections.
 Server health and sync state.
 
 **Returns:**
-- \`total_notes\`: Notes in vault
-- \`total_vectors\`: Embedded notes
-- \`embedder_ready\`: Embedding model loaded
+- \`totalNotes\`: Notes currently in the index
+- \`totalBlocks\`: Indexed blocks across those notes
+- \`embeddingDimension\`: Vector length of the active model
+- \`modelKey\`: Active embedding model
+- \`git\`: Repository status, or null when git is unavailable
 - \`sync\`: Commit/push state, pending paths, errors
+- \`index\`: Startup reconcile counts — \`indexed\`, \`missing\`, \`dropped\`, \`refused\`, \`missing_sample\`, and \`hint\` when refused
+
+\`index.indexed\` is a startup snapshot; \`totalNotes\` is read live. After a reconcile drops entries the two differ by design: \`indexed\` - \`dropped\` = \`totalNotes\`.
 
 ---
 
@@ -238,7 +247,7 @@ If the embedding model fails to load (memory, architecture, or dependency issues
 - **Writes still succeed** — notes are created/edited/deleted normally.
 - **Search falls back to keywords** — \`search_notes\` matches on title and body text only (no semantic similarity).
 
-Check \`get_stats\` → \`embedder_ready\` to verify model status.
+The fallback is automatic — no configuration or restart is needed. \`get_stats\` does not currently report model status.
 
 ## Performance
 

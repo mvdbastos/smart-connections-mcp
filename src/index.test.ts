@@ -295,3 +295,13 @@ describe('agent-facing naming', () => {
     expect(text).not.toMatch(/smart-connections-mcp/);
   });
 });
+
+describe('documented tool contract', () => {
+  it('never names a get_stats response field that does not exist', () => {
+    const text = MEMORY_RESOURCES.map((resource) => resource.text).join('\n');
+
+    expect(text).not.toMatch(/total_vectors/);
+    expect(text).not.toMatch(/embedder_ready/);
+    expect(text).not.toMatch(/total_notes/);
+  });
+});
