@@ -27,6 +27,11 @@ describe('index refusal hint', () => {
         expect(hint).not.toMatch(/rm -rf/);
         expect(hint).not.toMatch(/reset --hard/);
     });
+    it('gives the append-only reason rather than claiming the server never writes', () => {
+        const hint = buildIndexRefusalHint('/vault', refusedHealth());
+        expect(hint).toMatch(/only ever appends/);
+        expect(hint).not.toMatch(/never rewrites them itself/);
+    });
     it('presents both options and defers the choice to the user', () => {
         const hint = buildIndexRefusalHint('/vault', refusedHealth());
         expect(hint).toContain('Ask the user');

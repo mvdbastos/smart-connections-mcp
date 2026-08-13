@@ -28,3 +28,8 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Verify dist/ is current
+        run: |
+          git add --intent-to-add -- dist/
+          git diff --exit-code -- dist/
