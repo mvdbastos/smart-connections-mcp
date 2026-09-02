@@ -46,7 +46,7 @@ You should see `index.js` and other compiled files.
    Codex CLI command to add the MCP server:
 
    ```bash
-   codex mcp add obsidian-smart-connections --env SMART_VAULT_PATH=C:\\obsidian\\mb-kb -- node C:\\obsidian\\smart-connections-mcp\\dist\\index.js
+   claude mcp add --scope user --env SMART_VAULT_PATH=/ABSOLUTE/PATH/TO/YOUR/OBSIDIAN/VAULT --transport stdio obsidian -- node /ABSOLUTE/PATH/TO/smart-connections-mcp/dist/index.js
    ```
 
 ## Step 3: Restart Claude Desktop
